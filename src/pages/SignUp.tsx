@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SignUp as ClerkSignUp } from "@clerk/clerk-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
@@ -7,6 +7,15 @@ import { motion } from "framer-motion";
 
 const SignUp = () => {
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Use useEffect to set a timeout to hide the loading spinner after a reasonable delay
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1500); // Adjust the timeout as needed
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -34,20 +43,21 @@ const SignUp = () => {
               </div>
             )}
             
-            <ClerkSignUp 
-              appearance={{
-                elements: {
-                  rootBox: "w-full",
-                  card: "shadow-none p-0 border-0",
-                  formButtonPrimary: 
-                    "bg-primary hover:bg-primary/90 text-white rounded-md",
-                  footerAction: "text-primary hover:text-primary/90",
-                }
-              }}
-              signInUrl="/sign-in"
-              afterSignUpUrl="/dashboard"
-              onLoad={() => setIsLoading(false)}
-            />
+            <div className={isLoading ? "hidden" : "block"}>
+              <ClerkSignUp 
+                appearance={{
+                  elements: {
+                    rootBox: "w-full",
+                    card: "shadow-none p-0 border-0",
+                    formButtonPrimary: 
+                      "bg-primary hover:bg-primary/90 text-white rounded-md",
+                    footerAction: "text-primary hover:text-primary/90",
+                  }
+                }}
+                signInUrl="/sign-in"
+                afterSignUpUrl="/dashboard"
+              />
+            </div>
           </div>
         </div>
       </motion.main>
