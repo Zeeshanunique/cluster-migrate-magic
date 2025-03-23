@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, ChevronDown } from 'lucide-react';
+import { useUser, SignInButton, SignUpButton, UserButton } from '@clerk/clerk-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +16,7 @@ const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const { isSignedIn, user } = useUser();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -59,14 +61,16 @@ const Navbar = () => {
             Home
           </Link>
           
-          <Link 
-            to="/dashboard" 
-            className={`text-sm font-medium transition-colors hover:text-primary ${
-              location.pathname === '/dashboard' ? 'text-primary' : 'text-foreground/80'
-            }`}
-          >
-            Dashboard
-          </Link>
+          {isSignedIn && (
+            <Link 
+              to="/dashboard" 
+              className={`text-sm font-medium transition-colors hover:text-primary ${
+                location.pathname === '/dashboard' ? 'text-primary' : 'text-foreground/80'
+              }`}
+            >
+              Dashboard
+            </Link>
+          )}
           
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -78,6 +82,11 @@ const Navbar = () => {
               <DropdownMenuItem asChild>
                 <Link to="/migration" className="w-full cursor-pointer">
                   Cluster Migration
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/checkpoints" className="w-full cursor-pointer">
+                  Checkpoints
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
@@ -102,10 +111,27 @@ const Navbar = () => {
         </nav>
         
         <div className="hidden md:flex items-center space-x-4">
-          <Button variant="outline" size="sm">
-            Sign In
-          </Button>
-          <Button size="sm">Get Started</Button>
+          {isSignedIn ? (
+            <UserButton 
+              afterSignOutUrl="/"
+              appearance={{
+                elements: {
+                  userButtonAvatarBox: "w-9 h-9"
+                }
+              }}
+            />
+          ) : (
+            <>
+              <SignInButton mode="modal">
+                <Button variant="outline" size="sm">
+                  Sign In
+                </Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button size="sm">Get Started</Button>
+              </SignUpButton>
+            </>
+          )}
         </div>
         
         <button 
@@ -126,31 +152,68 @@ const Navbar = () => {
             >
               Home
             </Link>
-            <Link 
-              to="/dashboard" 
-              className="text-sm font-medium py-2 transition-colors hover:text-primary"
-            >
-              Dashboard
-            </Link>
-            <Link 
-              to="/migration" 
-              className="text-sm font-medium py-2 transition-colors hover:text-primary"
-            >
-              Cluster Migration
-            </Link>
+            
+            {isSignedIn && (
+              <>
+                <Link 
+                  to="/dashboard" 
+                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
+                >
+                  Dashboard
+                </Link>
+                <Link 
+                  to="/migration" 
+                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
+                >
+                  Cluster Migration
+                </Link>
+                <Link 
+                  to="/checkpoints" 
+                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
+                >
+                  Checkpoints
+                </Link>
+              </>
+            )}
+            
             <Link 
               to="/" 
               className="text-sm font-medium py-2 transition-colors hover:text-primary"
             >
               Documentation
             </Link>
+            
             <div className="pt-4 flex flex-col space-y-2">
-              <Button variant="outline" className="w-full">
-                Sign In
-              </Button>
-              <Button className="w-full">
-                Get Started
-              </Button>
+              {isSignedIn ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <UserButton 
+                      afterSignOutUrl="/"
+                      appearance={{
+                        elements: {
+                          userButtonAvatarBox: "w-8 h-8"
+                        }
+                      }}
+                    />
+                    <div className="text-sm font-medium">
+                      {user?.fullName || user?.username}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <SignInButton mode="modal">
+                    <Button variant="outline" className="w-full">
+                      Sign In
+                    </Button>
+                  </SignInButton>
+                  <SignUpButton mode="modal">
+                    <Button className="w-full">
+                      Get Started
+                    </Button>
+                  </SignUpButton>
+                </>
+              )}
             </div>
           </div>
         </div>
