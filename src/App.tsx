@@ -9,6 +9,7 @@ import { AnimatePresence } from "framer-motion";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import Migration from "./pages/Migration";
+import Checkpoints from "./pages/Checkpoints"; // Add the new page
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/migration" element={<Migration />} />
+            <Route path="/checkpoints" element={<Checkpoints />} /> {/* Add the new route */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AnimatePresence>

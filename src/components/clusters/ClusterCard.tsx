@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, Server, MoreHorizontal, Download, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronRight, Server, MoreHorizontal, Download, RefreshCw, Trash2, CheckSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import {
@@ -48,6 +48,10 @@ const ClusterCard = ({ cluster }: ClusterCardProps) => {
     navigate(`/migration?cluster=${cluster.id}`);
   };
   
+  const handleViewCheckpoints = () => {
+    navigate('/checkpoints');
+  };
+  
   const handleAction = (action: string) => {
     toast(`${action} cluster: ${cluster.name}`);
   };
@@ -78,11 +82,15 @@ const ClusterCard = ({ cluster }: ClusterCardProps) => {
                   <span className="sr-only">More options</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => handleAction('Details')}>
                   View Details
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleViewCheckpoints}>
+                  <CheckSquare className="mr-2 h-4 w-4" /> 
+                  View Checkpoints
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => handleAction('Download config')}>
                   <Download className="mr-2 h-4 w-4" /> 
