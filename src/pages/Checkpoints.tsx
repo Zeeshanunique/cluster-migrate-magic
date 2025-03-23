@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/layout/Navbar';
@@ -21,12 +20,11 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { Card, CardContent } from "@/components/ui/card";
-import { Calendar, Plus, Search, Filter, Clock, ArrowRight } from 'lucide-react';
+import { Calendar, Plus, Search, Filter, Clock, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import BlurContainer from '@/components/ui/BlurContainer';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// Mock data for checkpoints
 const checkpoints = [
   {
     id: 'checkpoint-1',
@@ -70,7 +68,6 @@ const checkpoints = [
   }
 ];
 
-// Mock data for timeline steps
 const timelineSteps = [
   {
     id: 'step-1',
@@ -116,10 +113,8 @@ const Checkpoints = () => {
   const [isLoading, setIsLoading] = useState(false);
   
   const filteredCheckpoints = checkpoints.filter(checkpoint => {
-    // Search filter
     const matchesSearch = checkpoint.name.toLowerCase().includes(searchQuery.toLowerCase());
     
-    // Status filter
     const matchesStatus = statusFilter === 'all' || checkpoint.status === statusFilter;
     
     return matchesSearch && matchesStatus;
