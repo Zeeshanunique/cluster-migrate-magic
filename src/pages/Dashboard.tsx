@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '@clerk/clerk-react';
@@ -20,7 +19,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { Plus, Search, Filter, Loader2 } from 'lucide-react';
+import { Plus, Search, Filter, Loader2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Cluster, clusterService } from '@/utils/supabase';
 
@@ -32,19 +31,22 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   
-  // Load clusters from Supabase
   useEffect(() => {
     const loadClusters = async () => {
       if (!isLoaded || !isSignedIn || !user) return;
       
       setIsLoading(true);
+      setConnectionError(null);
+      
       try {
         const data = await clusterService.getAllClusters(user.id);
         setClusters(data);
       } catch (error) {
         console.error('Error loading clusters:', error);
         toast.error('Failed to load clusters');
+        setConnectionError('Could not connect to Supabase. Please check your environment variables and network connection.');
       } finally {
         setIsLoading(false);
       }
@@ -53,14 +55,11 @@ const Dashboard = () => {
     loadClusters();
   }, [user, isSignedIn, isLoaded]);
   
-  // Handle deleted clusters
   const handleClusterDeleted = (clusterId: string) => {
     setClusters(prevClusters => prevClusters.filter(c => c.id !== clusterId));
   };
   
-  // Handle restarted clusters
   const handleClusterRestarted = (clusterId: string) => {
-    // Refresh the cluster data
     if (user) {
       clusterService.getClusterById(clusterId).then(updatedCluster => {
         if (updatedCluster) {
@@ -73,13 +72,10 @@ const Dashboard = () => {
   };
   
   const filteredClusters = clusters.filter(cluster => {
-    // Search filter
     const matchesSearch = cluster.name.toLowerCase().includes(searchQuery.toLowerCase());
     
-    // Status filter
     const matchesStatus = statusFilter === 'all' || cluster.status === statusFilter;
     
-    // Type filter
     const matchesType = typeFilter === 'all' || cluster.type === typeFilter;
     
     return matchesSearch && matchesStatus && matchesType;
@@ -90,6 +86,25 @@ const Dashboard = () => {
   
   const handleCreateCluster = () => {
     navigate('/create-cluster');
+  };
+
+  const handleRetry = () => {
+    if (user) {
+      setIsLoading(true);
+      clusterService.getAllClusters(user.id)
+        .then(data => {
+          setClusters(data);
+          setConnectionError(null);
+        })
+        .catch(error => {
+          console.error('Error retrying cluster load:', error);
+          toast.error('Still unable to load clusters');
+          setConnectionError('Could not connect to Supabase. Please check your environment variables and network connection.');
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    }
   };
 
   if (!isLoaded) {
@@ -122,6 +137,26 @@ const Dashboard = () => {
               <Plus className="mr-2 h-4 w-4" /> Create Cluster
             </Button>
           </div>
+          
+          {connectionError && (
+            <div className="mb-6 p-4 border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-800 rounded-md">
+              <div className="flex items-start">
+                <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 mr-2" />
+                <div>
+                  <h3 className="font-medium text-red-800 dark:text-red-300">Connection Error</h3>
+                  <p className="text-red-700 dark:text-red-300 mt-1 text-sm">{connectionError}</p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleRetry} 
+                    className="mt-2 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700 hover:bg-red-100 dark:hover:bg-red-900/30"
+                  >
+                    Retry Connection
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
           
           <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-subtle border border-gray-200 dark:border-gray-700">
@@ -193,101 +228,36 @@ const Dashboard = () => {
             </div>
           </div>
           
-          <Tabs defaultValue="all" className="space-y-6">
-            <TabsList>
-              <TabsTrigger value="all">All Clusters</TabsTrigger>
-              <TabsTrigger value="single">Single Clusters</TabsTrigger>
-              <TabsTrigger value="multi">Multi Clusters</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="all" className="mt-6">
-              {isLoading ? (
-                <div className="text-center py-12 flex flex-col items-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-                  <p>Loading clusters...</p>
-                </div>
-              ) : filteredClusters.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredClusters.map((cluster) => (
-                    <ClusterCard 
-                      key={cluster.id} 
-                      cluster={cluster} 
-                      onDelete={handleClusterDeleted}
-                      onRestart={handleClusterRestarted}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12 border border-dashed rounded-lg">
-                  <h3 className="text-lg font-medium mb-2">No clusters found</h3>
-                  <p className="text-muted-foreground mb-6">
-                    {searchQuery || statusFilter !== 'all' || typeFilter !== 'all' 
-                      ? 'No clusters match your current filters.' 
-                      : 'Create your first cluster to get started.'}
-                  </p>
-                  {!(searchQuery || statusFilter !== 'all' || typeFilter !== 'all') && (
-                    <Button onClick={handleCreateCluster}>
-                      <Plus className="mr-2 h-4 w-4" /> Create Cluster
-                    </Button>
-                  )}
-                </div>
-              )}
-            </TabsContent>
-            
-            <TabsContent value="single" className="mt-6">
-              {isLoading ? (
-                <div className="text-center py-12 flex flex-col items-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-                  <p>Loading clusters...</p>
-                </div>
-              ) : singleClusters.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {singleClusters.map((cluster) => (
-                    <ClusterCard 
-                      key={cluster.id} 
-                      cluster={cluster} 
-                      onDelete={handleClusterDeleted}
-                      onRestart={handleClusterRestarted}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">No single clusters found matching your filters.</p>
-                </div>
-              )}
-            </TabsContent>
-            
-            <TabsContent value="multi" className="mt-6">
-              {isLoading ? (
-                <div className="text-center py-12 flex flex-col items-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-                  <p>Loading clusters...</p>
-                </div>
-              ) : multiClusters.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {multiClusters.map((cluster) => (
-                    <ClusterCard 
-                      key={cluster.id} 
-                      cluster={cluster} 
-                      onDelete={handleClusterDeleted}
-                      onRestart={handleClusterRestarted}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">No multi clusters found matching your filters.</p>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-        </div>
-      </main>
-      
-      <Footer />
-    </div>
-  );
-};
-
-export default Dashboard;
+          {!connectionError && (
+            <Tabs defaultValue="all" className="space-y-6">
+              <TabsList>
+                <TabsTrigger value="all">All Clusters</TabsTrigger>
+                <TabsTrigger value="single">Single Clusters</TabsTrigger>
+                <TabsTrigger value="multi">Multi Clusters</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="all" className="mt-6">
+                {isLoading ? (
+                  <div className="text-center py-12 flex flex-col items-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                    <p>Loading clusters...</p>
+                  </div>
+                ) : filteredClusters.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredClusters.map((cluster) => (
+                      <ClusterCard 
+                        key={cluster.id} 
+                        cluster={cluster} 
+                        onDelete={handleClusterDeleted}
+                        onRestart={handleClusterRestarted}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 border border-dashed rounded-lg">
+                    <h3 className="text-lg font-medium mb-2">No clusters found</h3>
+                    <p className="text-muted-foreground mb-6">
+                      {searchQuery || statusFilter !== 'all' || typeFilter !== 'all' 
+                        ? 'No clusters match your current filters.' 
+                        : 'Create your first cluster to get started.'}
+                    </
