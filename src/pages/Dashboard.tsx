@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '@clerk/clerk-react';
@@ -260,4 +261,75 @@ const Dashboard = () => {
                       {searchQuery || statusFilter !== 'all' || typeFilter !== 'all' 
                         ? 'No clusters match your current filters.' 
                         : 'Create your first cluster to get started.'}
-                    </
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="single" className="mt-6">
+                {isLoading ? (
+                  <div className="text-center py-12 flex flex-col items-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                    <p>Loading clusters...</p>
+                  </div>
+                ) : singleClusters.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {singleClusters.map((cluster) => (
+                      <ClusterCard 
+                        key={cluster.id} 
+                        cluster={cluster} 
+                        onDelete={handleClusterDeleted}
+                        onRestart={handleClusterRestarted}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 border border-dashed rounded-lg">
+                    <h3 className="text-lg font-medium mb-2">No single clusters found</h3>
+                    <p className="text-muted-foreground mb-6">
+                      {searchQuery || statusFilter !== 'all'
+                        ? 'No single clusters match your current filters.'
+                        : 'Create your first single cluster to get started.'}
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="multi" className="mt-6">
+                {isLoading ? (
+                  <div className="text-center py-12 flex flex-col items-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                    <p>Loading clusters...</p>
+                  </div>
+                ) : multiClusters.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {multiClusters.map((cluster) => (
+                      <ClusterCard 
+                        key={cluster.id} 
+                        cluster={cluster} 
+                        onDelete={handleClusterDeleted}
+                        onRestart={handleClusterRestarted}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 border border-dashed rounded-lg">
+                    <h3 className="text-lg font-medium mb-2">No multi clusters found</h3>
+                    <p className="text-muted-foreground mb-6">
+                      {searchQuery || statusFilter !== 'all'
+                        ? 'No multi clusters match your current filters.'
+                        : 'Migrate a single cluster to create your first multi cluster.'}
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
+        </div>
+      </main>
+      <Footer />
+    </div>
+  );
+};
+
+export default Dashboard;
