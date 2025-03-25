@@ -1,5 +1,7 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useUser } from '@clerk/clerk-react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import ClusterCard from '@/components/clusters/ClusterCard';
@@ -18,57 +20,57 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { Plus, Search, Filter } from 'lucide-react';
+import { Plus, Search, Filter, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-
-// Mock data
-const clusters = [
-  {
-    id: 'cluster-1',
-    name: 'Production DB',
-    type: 'single' as const,
-    status: 'running' as const,
-    nodes: 3,
-    region: 'us-west-1',
-    version: 'v1.24.6',
-    lastUpdated: '1 day ago'
-  },
-  {
-    id: 'cluster-2',
-    name: 'Staging Environment',
-    type: 'single' as const,
-    status: 'running' as const,
-    nodes: 2,
-    region: 'eu-central-1',
-    version: 'v1.25.0',
-    lastUpdated: '3 days ago'
-  },
-  {
-    id: 'cluster-3',
-    name: 'Analytics Platform',
-    type: 'multi' as const,
-    status: 'running' as const,
-    nodes: 5,
-    region: 'us-east-1',
-    version: 'v1.24.8',
-    lastUpdated: '5 hours ago'
-  },
-  {
-    id: 'cluster-4',
-    name: 'Development',
-    type: 'single' as const,
-    status: 'pending' as const,
-    nodes: 1,
-    region: 'ap-southeast-1',
-    version: 'v1.24.9',
-    lastUpdated: 'Just now'
-  }
-];
+import { Cluster, clusterService } from '@/utils/supabase';
 
 const Dashboard = () => {
+  const navigate = useNavigate();
+  const { user, isSignedIn, isLoaded } = useUser();
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  
+  // Load clusters from Supabase
+  useEffect(() => {
+    const loadClusters = async () => {
+      if (!isLoaded || !isSignedIn || !user) return;
+      
+      setIsLoading(true);
+      try {
+        const data = await clusterService.getAllClusters(user.id);
+        setClusters(data);
+      } catch (error) {
+        console.error('Error loading clusters:', error);
+        toast.error('Failed to load clusters');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadClusters();
+  }, [user, isSignedIn, isLoaded]);
+  
+  // Handle deleted clusters
+  const handleClusterDeleted = (clusterId: string) => {
+    setClusters(prevClusters => prevClusters.filter(c => c.id !== clusterId));
+  };
+  
+  // Handle restarted clusters
+  const handleClusterRestarted = (clusterId: string) => {
+    // Refresh the cluster data
+    if (user) {
+      clusterService.getClusterById(clusterId).then(updatedCluster => {
+        if (updatedCluster) {
+          setClusters(prevClusters => 
+            prevClusters.map(c => c.id === clusterId ? updatedCluster : c)
+          );
+        }
+      });
+    }
+  };
   
   const filteredClusters = clusters.filter(cluster => {
     // Search filter
@@ -87,8 +89,25 @@ const Dashboard = () => {
   const multiClusters = filteredClusters.filter(cluster => cluster.type === 'multi');
   
   const handleCreateCluster = () => {
-    toast('Create new cluster functionality coming soon!');
+    navigate('/create-cluster');
   };
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <main className="flex-grow pt-20 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (!isSignedIn) {
+    navigate('/sign-in');
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -182,24 +201,54 @@ const Dashboard = () => {
             </TabsList>
             
             <TabsContent value="all" className="mt-6">
-              {filteredClusters.length > 0 ? (
+              {isLoading ? (
+                <div className="text-center py-12 flex flex-col items-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                  <p>Loading clusters...</p>
+                </div>
+              ) : filteredClusters.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredClusters.map((cluster) => (
-                    <ClusterCard key={cluster.id} cluster={cluster} />
+                    <ClusterCard 
+                      key={cluster.id} 
+                      cluster={cluster} 
+                      onDelete={handleClusterDeleted}
+                      onRestart={handleClusterRestarted}
+                    />
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">No clusters found matching your filters.</p>
+                <div className="text-center py-12 border border-dashed rounded-lg">
+                  <h3 className="text-lg font-medium mb-2">No clusters found</h3>
+                  <p className="text-muted-foreground mb-6">
+                    {searchQuery || statusFilter !== 'all' || typeFilter !== 'all' 
+                      ? 'No clusters match your current filters.' 
+                      : 'Create your first cluster to get started.'}
+                  </p>
+                  {!(searchQuery || statusFilter !== 'all' || typeFilter !== 'all') && (
+                    <Button onClick={handleCreateCluster}>
+                      <Plus className="mr-2 h-4 w-4" /> Create Cluster
+                    </Button>
+                  )}
                 </div>
               )}
             </TabsContent>
             
             <TabsContent value="single" className="mt-6">
-              {singleClusters.length > 0 ? (
+              {isLoading ? (
+                <div className="text-center py-12 flex flex-col items-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                  <p>Loading clusters...</p>
+                </div>
+              ) : singleClusters.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {singleClusters.map((cluster) => (
-                    <ClusterCard key={cluster.id} cluster={cluster} />
+                    <ClusterCard 
+                      key={cluster.id} 
+                      cluster={cluster} 
+                      onDelete={handleClusterDeleted}
+                      onRestart={handleClusterRestarted}
+                    />
                   ))}
                 </div>
               ) : (
@@ -210,10 +259,20 @@ const Dashboard = () => {
             </TabsContent>
             
             <TabsContent value="multi" className="mt-6">
-              {multiClusters.length > 0 ? (
+              {isLoading ? (
+                <div className="text-center py-12 flex flex-col items-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                  <p>Loading clusters...</p>
+                </div>
+              ) : multiClusters.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {multiClusters.map((cluster) => (
-                    <ClusterCard key={cluster.id} cluster={cluster} />
+                    <ClusterCard 
+                      key={cluster.id} 
+                      cluster={cluster} 
+                      onDelete={handleClusterDeleted}
+                      onRestart={handleClusterRestarted}
+                    />
                   ))}
                 </div>
               ) : (

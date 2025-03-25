@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, Server, MoreHorizontal, Download, RefreshCw, Trash2, CheckSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useUser } from '@clerk/clerk-react';
+import { Cluster, clusterService } from '@/utils/supabase';
 
 import {
   DropdownMenu,
@@ -17,21 +19,17 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 
 interface ClusterCardProps {
-  cluster: {
-    id: string;
-    name: string;
-    type: 'single' | 'multi';
-    status: 'running' | 'pending' | 'failed';
-    nodes: number;
-    region: string;
-    version: string;
-    lastUpdated: string;
-  };
+  cluster: Cluster;
+  onDelete: (clusterId: string) => void;
+  onRestart: (clusterId: string) => void;
 }
 
-const ClusterCard = ({ cluster }: ClusterCardProps) => {
+const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
   const navigate = useNavigate();
+  const { user } = useUser();
   const [isHovered, setIsHovered] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
   
   const statusColors = {
     running: 'bg-green-500',
@@ -44,6 +42,21 @@ const ClusterCard = ({ cluster }: ClusterCardProps) => {
     multi: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300'
   };
 
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const differenceInMs = now.getTime() - date.getTime();
+    const differenceInHours = differenceInMs / (1000 * 60 * 60);
+    
+    if (differenceInHours < 1) {
+      return 'Just now';
+    } else if (differenceInHours < 24) {
+      return `${Math.floor(differenceInHours)} hours ago`;
+    } else {
+      return `${Math.floor(differenceInHours / 24)} days ago`;
+    }
+  };
+
   const handleMigrate = () => {
     navigate(`/migration?cluster=${cluster.id}`);
   };
@@ -54,6 +67,66 @@ const ClusterCard = ({ cluster }: ClusterCardProps) => {
   
   const handleAction = (action: string) => {
     toast(`${action} cluster: ${cluster.name}`);
+  };
+
+  const handleDelete = async () => {
+    if (!user) return;
+    
+    if (window.confirm(`Are you sure you want to delete ${cluster.name}?`)) {
+      setIsDeleting(true);
+      try {
+        const success = await clusterService.deleteCluster(cluster.id);
+        if (success) {
+          onDelete(cluster.id);
+          toast.success(`Cluster "${cluster.name}" deleted successfully`);
+        }
+      } catch (error) {
+        console.error('Error deleting cluster:', error);
+        toast.error(`Failed to delete cluster ${cluster.name}`);
+      } finally {
+        setIsDeleting(false);
+      }
+    }
+  };
+
+  const handleRestart = async () => {
+    if (!user) return;
+    
+    setIsRestarting(true);
+    try {
+      // First, set status to pending
+      await clusterService.updateCluster(cluster.id, { status: 'pending' });
+      onRestart(cluster.id);
+      
+      // Simulate restart process
+      setTimeout(async () => {
+        await clusterService.updateCluster(cluster.id, { status: 'running' });
+        onRestart(cluster.id);
+        toast.success(`Cluster "${cluster.name}" restarted successfully`);
+      }, 3000);
+    } catch (error) {
+      console.error('Error restarting cluster:', error);
+      toast.error(`Failed to restart cluster ${cluster.name}`);
+    } finally {
+      setIsRestarting(false);
+    }
+  };
+
+  const handleDownloadConfig = () => {
+    if (cluster.kubeconfig) {
+      const blob = new Blob([cluster.kubeconfig], { type: 'text/yaml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cluster.name}-kubeconfig.yaml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`Kubeconfig for "${cluster.name}" downloaded`);
+    } else {
+      toast.error(`No kubeconfig available for "${cluster.name}"`);
+    }
   };
 
   return (
@@ -92,21 +165,25 @@ const ClusterCard = ({ cluster }: ClusterCardProps) => {
                   <CheckSquare className="mr-2 h-4 w-4" /> 
                   View Checkpoints
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleAction('Download config')}>
+                <DropdownMenuItem onClick={handleDownloadConfig}>
                   <Download className="mr-2 h-4 w-4" /> 
                   Download Config
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleAction('Restart')}>
-                  <RefreshCw className="mr-2 h-4 w-4" /> 
-                  Restart
+                <DropdownMenuItem 
+                  onClick={handleRestart}
+                  disabled={isRestarting || cluster.status === 'pending'}
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 ${isRestarting ? 'animate-spin' : ''}`} /> 
+                  {isRestarting ? 'Restarting...' : 'Restart'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
-                  onClick={() => handleAction('Delete')}
+                  onClick={handleDelete}
+                  disabled={isDeleting}
                   className="text-red-600 dark:text-red-400"
                 >
                   <Trash2 className="mr-2 h-4 w-4" /> 
-                  Delete
+                  {isDeleting ? 'Deleting...' : 'Delete'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -128,11 +205,11 @@ const ClusterCard = ({ cluster }: ClusterCardProps) => {
           </div>
           <div>
             <p className="text-muted-foreground">Version</p>
-            <p className="font-medium">{cluster.version}</p>
+            <p className="font-medium">v{cluster.version}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Last Updated</p>
-            <p className="font-medium">{cluster.lastUpdated}</p>
+            <p className="font-medium">{formatDate(cluster.created_at)}</p>
           </div>
         </div>
       </div>

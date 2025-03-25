@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import Migration from "./pages/Migration";
 import Checkpoints from "./pages/Checkpoints";
+import CreateCluster from "./pages/CreateCluster";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import NotFound from "./pages/NotFound";
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/migration" element={<ProtectedRoute><Migration /></ProtectedRoute>} />
             <Route path="/checkpoints" element={<ProtectedRoute><Checkpoints /></ProtectedRoute>} />
+            <Route path="/create-cluster" element={<ProtectedRoute><CreateCluster /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AnimatePresence>

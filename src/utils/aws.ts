@@ -1,5 +1,6 @@
 
 import { toast } from "sonner";
+import { supabase } from './supabase';
 
 // Types for AWS EKS resources
 export interface EKSClusterConfig {
@@ -280,3 +281,5 @@ export const checkClusterCompatibility = async (
     };
   }
 };
+
+export { supabase };
