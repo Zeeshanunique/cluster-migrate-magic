@@ -29,7 +29,8 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { CreateClusterPayload, clusterService, generateKubeconfig } from '@/utils';
+import { CreateClusterPayload, clusterService } from '@/utils/supabase';
+import { generateKubeconfig } from '@/utils/aws';
 import { toast } from 'sonner';
 
 // List of AWS regions
