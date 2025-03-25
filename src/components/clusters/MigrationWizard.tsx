@@ -24,58 +24,52 @@ import {
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import BlurContainer from '@/components/ui/BlurContainer';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-
-const awsRegions = [
-  { value: "us-east-1", label: "US East (N. Virginia)" },
-  { value: "us-east-2", label: "US East (Ohio)" },
-  { value: "us-west-1", label: "US West (N. California)" },
-  { value: "us-west-2", label: "US West (Oregon)" },
-  { value: "eu-west-1", label: "EU West (Ireland)" },
-  { value: "eu-central-1", label: "EU Central (Frankfurt)" },
-  { value: "ap-northeast-1", label: "Asia Pacific (Tokyo)" },
-  { value: "ap-southeast-1", label: "Asia Pacific (Singapore)" },
-  { value: "ap-southeast-2", label: "Asia Pacific (Sydney)" },
-];
+import AWSClusterConfig from './AWSClusterConfig';
+import ResourceInventory from './ResourceInventory';
+import CompatibilityCheck from './CompatibilityCheck';
+import { 
+  EKSClusterConfig, 
+  EKSNodeInfo, 
+  EKSPodInfo, 
+  EKSPVInfo, 
+  connectToEKSCluster, 
+  getEKSNodes, 
+  getEKSPods, 
+  getEKSPVs,
+  migrateResources,
+  checkClusterCompatibility
+} from '@/utils/aws';
 
 const steps = [
   { 
-    id: 'init', 
+    id: 'connect', 
     title: 'Connect to AWS EKS Clusters', 
     description: 'Connect to source and target EKS clusters',
     icon: <Cloud className="h-4 w-4" />
   },
   { 
-    id: 'backup', 
-    title: 'Backup Resources', 
-    description: 'Create snapshots of workloads and persistent volumes',
+    id: 'inventory', 
+    title: 'Resource Inventory', 
+    description: 'View and select resources to migrate',
     icon: <Database className="h-4 w-4" />
   },
   { 
-    id: 'transform', 
-    title: 'Transform Resources', 
-    description: 'Prepare resource manifests for target cluster',
+    id: 'compatibility', 
+    title: 'Compatibility Check', 
+    description: 'Verify clusters are compatible for migration',
     icon: <Server className="h-4 w-4" />
   },
   { 
-    id: 'auth', 
-    title: 'Configure IAM Roles', 
-    description: 'Set up necessary permissions in target cluster',
+    id: 'migration', 
+    title: 'Migration Execution', 
+    description: 'Migrate selected resources to target cluster',
     icon: <Shield className="h-4 w-4" />
   },
   { 
-    id: 'deploy', 
-    title: 'Deploy to Target', 
-    description: 'Apply transformed resources to target cluster',
-    icon: <ChevronRight className="h-4 w-4" />
-  },
-  { 
-    id: 'finalize', 
-    title: 'Validate Migration', 
-    description: 'Verify all workloads are running correctly',
+    id: 'verify', 
+    title: 'Verify Migration', 
+    description: 'Verify all resources are properly migrated',
     icon: <Check className="h-4 w-4" />
   },
 ];
@@ -91,50 +85,231 @@ const MigrationWizard = () => {
   const [error, setError] = useState<string | null>(null);
   
   // AWS EKS specific configuration
-  const [sourceConfig, setSourceConfig] = useState({
+  const [sourceConfig, setSourceConfig] = useState<EKSClusterConfig>({
     clusterName: clusterId || '',
     region: 'us-east-1',
+    useIAMRole: false,
   });
   
-  const [targetConfig, setTargetConfig] = useState({
+  const [targetConfig, setTargetConfig] = useState<EKSClusterConfig>({
     clusterName: '',
     region: 'us-east-1',
+    useIAMRole: false,
   });
-  
-  useEffect(() => {
-    // Simulate the migration process for demo purposes
-    if (status === 'running') {
-      const timer = setTimeout(() => {
-        if (currentStep < steps.length - 1) {
-          setCurrentStep((prev) => prev + 1);
-          setProgress(((currentStep + 2) / steps.length) * 100);
-        } else {
-          setStatus('completed');
-          setProgress(100);
-          toast.success('Migration completed successfully');
-        }
-      }, 2000);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [status, currentStep]);
-  
-  const startMigration = () => {
-    if (!sourceConfig.clusterName || !targetConfig.clusterName) {
-      toast.error('Please provide both source and target cluster names');
+
+  // Resource data states
+  const [sourceConnected, setSourceConnected] = useState(false);
+  const [targetConnected, setTargetConnected] = useState(false);
+  const [loadingResources, setLoadingResources] = useState(false);
+  const [nodes, setNodes] = useState<EKSNodeInfo[]>([]);
+  const [pods, setPods] = useState<EKSPodInfo[]>([]);
+  const [persistentVolumes, setPersistentVolumes] = useState<EKSPVInfo[]>([]);
+
+  // Compatibility check states
+  const [checkingCompatibility, setCheckingCompatibility] = useState(false);
+  const [compatibility, setCompatibility] = useState<{ compatible: boolean; issues: string[] }>({
+    compatible: false,
+    issues: [],
+  });
+
+  // Migration progress state
+  const [migrationProgress, setMigrationProgress] = useState({ step: 0, message: '' });
+
+  // Connect to clusters
+  const connectToClusters = async () => {
+    // Validate inputs
+    if (!sourceConfig.clusterName) {
+      toast.error("Source cluster name is required");
       return;
     }
     
+    if (!targetConfig.clusterName) {
+      toast.error("Target cluster name is required");
+      return;
+    }
+
+    // Check if kubeconfig or IAM role is provided for both clusters
+    if (!sourceConfig.kubeconfig && !sourceConfig.useIAMRole) {
+      toast.error("Please provide a kubeconfig or enable IAM role for the source cluster");
+      return;
+    }
+
+    if (!targetConfig.kubeconfig && !targetConfig.useIAMRole) {
+      toast.error("Please provide a kubeconfig or enable IAM role for the target cluster");
+      return;
+    }
+
     setStatus('running');
-    setProgress((1 / steps.length) * 100);
-    toast('AWS EKS migration process started');
+    
+    // Connect to source cluster
+    const sourceConnected = await connectToEKSCluster(sourceConfig);
+    setSourceConnected(sourceConnected);
+    
+    if (!sourceConnected) {
+      setStatus('error');
+      setError("Failed to connect to source cluster");
+      return;
+    }
+    
+    // Connect to target cluster
+    const targetConnected = await connectToEKSCluster(targetConfig);
+    setTargetConnected(targetConnected);
+    
+    if (!targetConnected) {
+      setStatus('error');
+      setError("Failed to connect to target cluster");
+      return;
+    }
+    
+    // If both connections are successful, advance to the next step
+    toast.success("Connected to both clusters successfully");
+    setCurrentStep(1);
+    setProgress(((currentStep + 2) / steps.length) * 100);
+    setStatus('idle');
   };
-  
+
+  // Load resources from source cluster
+  const loadResources = async () => {
+    if (!sourceConnected) {
+      toast.error("Please connect to the source cluster first");
+      return;
+    }
+
+    setLoadingResources(true);
+    setStatus('running');
+
+    try {
+      // Fetch nodes, pods, and persistent volumes in parallel
+      const [nodesData, podsData, pvsData] = await Promise.all([
+        getEKSNodes(sourceConfig),
+        getEKSPods(sourceConfig),
+        getEKSPVs(sourceConfig)
+      ]);
+
+      setNodes(nodesData);
+      setPods(podsData);
+      setPersistentVolumes(pvsData);
+
+      toast.success("Resources loaded successfully");
+      setStatus('idle');
+    } catch (error) {
+      console.error("Failed to load resources:", error);
+      setStatus('error');
+      setError(`Failed to load resources: ${(error as Error).message}`);
+    } finally {
+      setLoadingResources(false);
+    }
+  };
+
+  // Handle pod selection change
+  const handlePodSelectionChange = (pod: EKSPodInfo, selected: boolean) => {
+    setPods(prevPods => 
+      prevPods.map(p => 
+        p.name === pod.name ? { ...p, selected } : p
+      )
+    );
+  };
+
+  // Handle persistent volume selection change
+  const handlePVSelectionChange = (pv: EKSPVInfo, selected: boolean) => {
+    setPersistentVolumes(prevPVs => 
+      prevPVs.map(p => 
+        p.name === pv.name ? { ...p, selected } : p
+      )
+    );
+  };
+
+  // Handle select all functionality
+  const handleSelectAll = (resourceType: 'pods' | 'pvs', selectAll: boolean) => {
+    if (resourceType === 'pods') {
+      setPods(prevPods => prevPods.map(pod => ({ ...pod, selected: selectAll })));
+    } else {
+      setPersistentVolumes(prevPVs => prevPVs.map(pv => ({ ...pv, selected: selectAll })));
+    }
+  };
+
+  // Proceed to compatibility check
+  const proceedToCompatibilityCheck = async () => {
+    // Check if any resources are selected
+    const selectedPods = pods.filter(pod => pod.selected).length;
+    const selectedPVs = persistentVolumes.filter(pv => pv.selected).length;
+    
+    if (selectedPods === 0 && selectedPVs === 0) {
+      toast.error("Please select at least one resource to migrate");
+      return;
+    }
+    
+    setCheckingCompatibility(true);
+    setStatus('running');
+    
+    try {
+      // Check compatibility between clusters
+      const compatibilityResult = await checkClusterCompatibility(sourceConfig, targetConfig);
+      setCompatibility(compatibilityResult);
+      
+      // Move to next step
+      setCurrentStep(2);
+      setProgress(((currentStep + 2) / steps.length) * 100);
+      setStatus('idle');
+    } catch (error) {
+      console.error("Failed to check compatibility:", error);
+      setStatus('error');
+      setError(`Failed to check compatibility: ${(error as Error).message}`);
+    } finally {
+      setCheckingCompatibility(false);
+    }
+  };
+
+  // Start migration
+  const startMigration = async () => {
+    setStatus('running');
+    setCurrentStep(3);
+    setProgress(((currentStep + 2) / steps.length) * 100);
+    
+    const selectedPods = pods.filter(pod => pod.selected);
+    const selectedPVs = persistentVolumes.filter(pv => pv.selected);
+    
+    try {
+      // Start the migration process
+      const success = await migrateResources(
+        sourceConfig,
+        targetConfig,
+        selectedPods,
+        selectedPVs,
+        (step, message) => {
+          setMigrationProgress({ step, message });
+        }
+      );
+      
+      if (success) {
+        // Move to verification step
+        setCurrentStep(4);
+        setProgress(100);
+        toast.success("Migration completed successfully");
+        setStatus('completed');
+      } else {
+        setStatus('error');
+        setError("Migration failed");
+      }
+    } catch (error) {
+      console.error("Migration failed:", error);
+      setStatus('error');
+      setError(`Migration failed: ${(error as Error).message}`);
+    }
+  };
+
   const resetMigration = () => {
     setCurrentStep(0);
     setProgress(0);
     setStatus('idle');
     setError(null);
+    setSourceConnected(false);
+    setTargetConnected(false);
+    setNodes([]);
+    setPods([]);
+    setPersistentVolumes([]);
+    setCompatibility({ compatible: false, issues: [] });
+    setMigrationProgress({ step: 0, message: '' });
   };
   
   const finishMigration = () => {
@@ -142,94 +317,225 @@ const MigrationWizard = () => {
     toast.success('Cluster migrated successfully');
   };
   
-  const simulateError = () => {
-    setStatus('error');
-    setError('AWS API connectivity issue detected. Please check your AWS credentials and cluster configuration.');
-    toast.error('Migration encountered an error');
+  // Load resources when source is connected and step is inventory
+  useEffect(() => {
+    if (sourceConnected && currentStep === 1 && nodes.length === 0) {
+      loadResources();
+    }
+  }, [sourceConnected, currentStep]);
+
+  // Render the current step content
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 0: // Connect to clusters
+        return (
+          <div className="space-y-6">
+            <AWSClusterConfig
+              title="Source EKS Cluster"
+              config={sourceConfig}
+              onChange={setSourceConfig}
+              disabled={status === 'running'}
+            />
+            
+            <AWSClusterConfig
+              title="Target EKS Cluster"
+              config={targetConfig}
+              onChange={setTargetConfig}
+              disabled={status === 'running'}
+            />
+          </div>
+        );
+        
+      case 1: // Resource inventory
+        return (
+          <div className="space-y-6">
+            <p className="text-sm text-muted-foreground mb-4">
+              Select the resources you want to migrate from <strong>{sourceConfig.clusterName}</strong> to <strong>{targetConfig.clusterName}</strong>.
+            </p>
+            
+            <ResourceInventory
+              nodes={nodes}
+              pods={pods}
+              persistentVolumes={persistentVolumes}
+              loading={loadingResources}
+              onPodSelectionChange={handlePodSelectionChange}
+              onPVSelectionChange={handlePVSelectionChange}
+              onSelectAll={handleSelectAll}
+            />
+          </div>
+        );
+        
+      case 2: // Compatibility check
+        return (
+          <div className="space-y-6">
+            <p className="text-sm text-muted-foreground mb-4">
+              Checking compatibility between source cluster <strong>{sourceConfig.clusterName}</strong> and target cluster <strong>{targetConfig.clusterName}</strong>.
+            </p>
+            
+            <CompatibilityCheck
+              compatible={compatibility.compatible}
+              issues={compatibility.issues}
+              loading={checkingCompatibility}
+            />
+            
+            <div className="border rounded-md p-4 bg-muted/20">
+              <h4 className="font-medium mb-2">Migration Summary</h4>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>{pods.filter(pod => pod.selected).length} pods selected for migration</li>
+                <li>{persistentVolumes.filter(pv => pv.selected).length} persistent volumes selected for migration</li>
+                <li>Source: {sourceConfig.clusterName} ({sourceConfig.region})</li>
+                <li>Target: {targetConfig.clusterName} ({targetConfig.region})</li>
+              </ul>
+            </div>
+          </div>
+        );
+        
+      case 3: // Migration execution
+        return (
+          <div className="space-y-6">
+            <p className="text-sm text-muted-foreground mb-4">
+              Migrating resources from <strong>{sourceConfig.clusterName}</strong> to <strong>{targetConfig.clusterName}</strong>.
+            </p>
+            
+            <div className="border rounded-md p-4">
+              <h4 className="font-medium mb-4">Migration Progress</h4>
+              <div className="space-y-4">
+                <Progress value={(migrationProgress.step / 5) * 100} className="h-2" />
+                <p className="text-sm">
+                  Step {migrationProgress.step}/5: {migrationProgress.message}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+        
+      case 4: // Verify migration
+        return (
+          <div className="space-y-6">
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md p-4 text-green-800 dark:text-green-300">
+              <h4 className="font-medium flex items-center">
+                <Check className="h-5 w-5 mr-2" />
+                Migration Completed Successfully
+              </h4>
+              <p className="mt-2 text-sm">
+                All selected resources have been successfully migrated from <strong>{sourceConfig.clusterName}</strong> to <strong>{targetConfig.clusterName}</strong>.
+              </p>
+            </div>
+            
+            <div className="border rounded-md p-4">
+              <h4 className="font-medium mb-2">Migration Summary</h4>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>{pods.filter(pod => pod.selected).length} pods migrated</li>
+                <li>{persistentVolumes.filter(pv => pv.selected).length} persistent volumes migrated</li>
+                <li>Source: {sourceConfig.clusterName} ({sourceConfig.region})</li>
+                <li>Target: {targetConfig.clusterName} ({targetConfig.region})</li>
+              </ul>
+            </div>
+          </div>
+        );
+        
+      default:
+        return null;
+    }
   };
 
-  // Render the configuration form for the initial step
-  const renderClusterConfigForm = () => {
-    if (currentStep > 0 || status !== 'idle') {
-      return null;
-    }
-    
-    return (
-      <div className="space-y-4 mb-6 p-4 bg-background/50 rounded-lg border">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <div className="font-medium">Source EKS Cluster</div>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="source-cluster">Cluster Name</Label>
-                <Input 
-                  id="source-cluster" 
-                  placeholder="eks-source-cluster" 
-                  value={sourceConfig.clusterName}
-                  onChange={(e) => setSourceConfig({...sourceConfig, clusterName: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="source-region">AWS Region</Label>
-                <Select 
-                  value={sourceConfig.region}
-                  onValueChange={(value) => setSourceConfig({...sourceConfig, region: value})}
-                >
-                  <SelectTrigger id="source-region">
-                    <SelectValue placeholder="Select AWS Region" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {awsRegions.map(region => (
-                      <SelectItem key={`source-${region.value}`} value={region.value}>
-                        {region.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="font-medium">Target EKS Cluster</div>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="target-cluster">Cluster Name</Label>
-                <Input 
-                  id="target-cluster" 
-                  placeholder="eks-target-cluster" 
-                  value={targetConfig.clusterName}
-                  onChange={(e) => setTargetConfig({...targetConfig, clusterName: e.target.value})}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="target-region">AWS Region</Label>
-                <Select 
-                  value={targetConfig.region}
-                  onValueChange={(value) => setTargetConfig({...targetConfig, region: value})}
-                >
-                  <SelectTrigger id="target-region">
-                    <SelectValue placeholder="Select AWS Region" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {awsRegions.map(region => (
-                      <SelectItem key={`target-${region.value}`} value={region.value}>
-                        {region.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-        </div>
+  // Step buttons for each step
+  const renderStepButtons = () => {
+    switch (currentStep) {
+      case 0: // Connect to clusters
+        return (
+          <>
+            <Button variant="outline" onClick={() => navigate('/dashboard')}>
+              Cancel
+            </Button>
+            <Button onClick={connectToClusters} disabled={status === 'running'}>
+              {status === 'running' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                'Connect to Clusters'
+              )}
+            </Button>
+          </>
+        );
         
-        <div className="mt-4 text-sm text-muted-foreground">
-          <p>This will connect to your AWS EKS clusters using the current IAM credentials.</p>
-          <p>Ensure your IAM user/role has sufficient permissions to access both clusters.</p>
-        </div>
-      </div>
-    );
+      case 1: // Resource inventory
+        return (
+          <>
+            <Button variant="outline" onClick={() => {
+              setCurrentStep(0);
+              setProgress(((0) / steps.length) * 100);
+            }}>
+              Back
+            </Button>
+            <Button onClick={proceedToCompatibilityCheck} disabled={status === 'running' || loadingResources}>
+              {status === 'running' || loadingResources ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                'Check Compatibility'
+              )}
+            </Button>
+          </>
+        );
+        
+      case 2: // Compatibility check
+        return (
+          <>
+            <Button variant="outline" onClick={() => {
+              setCurrentStep(1);
+              setProgress(((1) / steps.length) * 100);
+            }}>
+              Back
+            </Button>
+            <Button 
+              onClick={startMigration} 
+              disabled={status === 'running' || checkingCompatibility || !compatibility.compatible}
+            >
+              {status === 'running' || checkingCompatibility ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Checking...
+                </>
+              ) : (
+                'Start Migration'
+              )}
+            </Button>
+          </>
+        );
+        
+      case 3: // Migration execution
+        return (
+          <>
+            <Button variant="outline" disabled={true}>
+              Back
+            </Button>
+            <Button disabled={true}>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Migrating...
+            </Button>
+          </>
+        );
+        
+      case 4: // Verify migration
+        return (
+          <>
+            <Button variant="outline" onClick={resetMigration}>
+              Start New Migration
+            </Button>
+            <Button onClick={finishMigration}>
+              Complete Migration
+            </Button>
+          </>
+        );
+        
+      default:
+        return null;
+    }
   };
 
   return (
@@ -251,8 +557,6 @@ const MigrationWizard = () => {
             <span>Step {currentStep + 1} of {steps.length}</span>
           </div>
         </div>
-        
-        {renderClusterConfigForm()}
         
         <div className="space-y-6">
           {steps.map((step, index) => (
@@ -289,20 +593,15 @@ const MigrationWizard = () => {
                   <h3 className="text-md font-medium mb-1">{step.title}</h3>
                   <p className="text-sm text-muted-foreground">{step.description}</p>
                   
-                  {currentStep === index && status === 'running' && (
+                  {currentStep === index && (
                     <AnimatePresence>
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="mt-3"
+                        className="mt-4"
                       >
-                        <BlurContainer className="px-4 py-3 text-sm" intensity="light">
-                          <div className="flex items-center">
-                            <Loader2 className="h-3 w-3 animate-spin mr-2 text-primary" />
-                            <span>Processing {step.id} for AWS EKS clusters...</span>
-                          </div>
-                        </BlurContainer>
+                        {renderStepContent()}
                       </motion.div>
                     </AnimatePresence>
                   )}
@@ -332,50 +631,7 @@ const MigrationWizard = () => {
       </CardContent>
       
       <CardFooter className="flex justify-between">
-        {status === 'idle' && (
-          <>
-            <Button variant="outline" onClick={() => navigate('/dashboard')}>
-              Cancel
-            </Button>
-            <Button onClick={startMigration}>
-              Start Migration
-            </Button>
-          </>
-        )}
-        
-        {status === 'running' && (
-          <>
-            <Button variant="outline" onClick={simulateError}>
-              Simulate Error
-            </Button>
-            <Button disabled>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Migrating AWS Clusters...
-            </Button>
-          </>
-        )}
-        
-        {status === 'completed' && (
-          <>
-            <Button variant="outline" onClick={resetMigration}>
-              Restart
-            </Button>
-            <Button onClick={finishMigration}>
-              Complete <ChevronRight className="ml-2 h-4 w-4" />
-            </Button>
-          </>
-        )}
-        
-        {status === 'error' && (
-          <>
-            <Button variant="outline" onClick={() => navigate('/dashboard')}>
-              Cancel
-            </Button>
-            <Button onClick={resetMigration}>
-              Try Again
-            </Button>
-          </>
-        )}
+        {renderStepButtons()}
       </CardFooter>
     </Card>
   );
