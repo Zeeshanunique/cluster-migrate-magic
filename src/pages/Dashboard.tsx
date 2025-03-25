@@ -1,7 +1,6 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import ClusterCard from '@/components/clusters/ClusterCard';
@@ -26,7 +25,7 @@ import { Cluster, clusterService } from '@/utils/supabase';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { user, isSignedIn, isLoaded } = useUser();
+  const { user } = useAuth();
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,27 +33,60 @@ const Dashboard = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   
+  // Force refresh when URL has refresh parameter (from migration page)
   useEffect(() => {
-    const loadClusters = async () => {
-      if (!isLoaded || !isSignedIn || !user) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const refreshParam = urlParams.get('refresh');
+    
+    if (refreshParam) {
+      // Clear the URL parameter without triggering page reload
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
       
-      setIsLoading(true);
-      setConnectionError(null);
+      // Show toast message
+      toast.info("Refreshing dashboard data...");
       
-      try {
-        const data = await clusterService.getAllClusters(user.id);
-        setClusters(data);
-      } catch (error) {
-        console.error('Error loading clusters:', error);
-        toast.error('Failed to load clusters');
-        setConnectionError('Could not connect to Supabase. Please check your environment variables and network connection.');
-      } finally {
-        setIsLoading(false);
+      // Reload clusters data
+      if (user) {
+        loadClusters();
       }
-    };
+    }
+  }, [window.location.search]);
+  
+  const loadClusters = async () => {
+    if (!user) return;
+    
+    setIsLoading(true);
+    setConnectionError(null);
+    
+    try {
+      console.log('Loading clusters for user:', user.id);
+      const data = await clusterService.getAllClusters(user.id);
+      console.log('Clusters loaded successfully:', data.length);
+      
+      // Sort clusters by type and then by name for consistent display
+      const sortedData = [...data].sort((a, b) => {
+        // First sort by type (single first, then multi)
+        if (a.type !== b.type) {
+          return a.type === 'single' ? -1 : 1;
+        }
+        // Then sort by name
+        return a.name.localeCompare(b.name);
+      });
+      
+      setClusters(sortedData);
+    } catch (error) {
+      console.error('Error loading clusters:', error);
+      toast.error('Failed to load clusters');
+      setConnectionError('Could not connect to Supabase. Please check your Supabase setup - verify the clusters table exists and has proper RLS policies.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadClusters();
-  }, [user, isSignedIn, isLoaded]);
+  }, [user]);
   
   const handleClusterDeleted = (clusterId: string) => {
     setClusters(prevClusters => prevClusters.filter(c => c.id !== clusterId));
@@ -92,6 +124,7 @@ const Dashboard = () => {
   const handleRetry = () => {
     if (user) {
       setIsLoading(true);
+      
       clusterService.getAllClusters(user.id)
         .then(data => {
           setClusters(data);
@@ -100,30 +133,13 @@ const Dashboard = () => {
         .catch(error => {
           console.error('Error retrying cluster load:', error);
           toast.error('Still unable to load clusters');
-          setConnectionError('Could not connect to Supabase. Please check your environment variables and network connection.');
+          setConnectionError('Could not connect to Supabase. Please check your Supabase setup - verify the clusters table exists and has proper RLS policies.');
         })
         .finally(() => {
           setIsLoading(false);
         });
     }
   };
-
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Navbar />
-        <main className="flex-grow pt-20 flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </main>
-        <Footer />
-      </div>
-    );
-  }
-
-  if (!isSignedIn) {
-    navigate('/sign-in');
-    return null;
-  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -166,6 +182,15 @@ const Dashboard = () => {
               <div className="mt-2 text-sm text-muted-foreground">
                 {singleClusters.length} single, {multiClusters.length} multi
               </div>
+              {multiClusters.length > 0 && (
+                <Button
+                  variant="link"
+                  className="px-0 mt-2 h-auto"
+                  onClick={() => navigate('/multi-cluster')}
+                >
+                  View Multi-Clusters →
+                </Button>
+              )}
             </div>
             
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-subtle border border-gray-200 dark:border-gray-700">
@@ -248,20 +273,22 @@ const Dashboard = () => {
                     {filteredClusters.map((cluster) => (
                       <ClusterCard 
                         key={cluster.id} 
-                        cluster={cluster} 
+                        cluster={cluster}
                         onDelete={handleClusterDeleted}
                         onRestart={handleClusterRestarted}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-12 border border-dashed rounded-lg">
-                    <h3 className="text-lg font-medium mb-2">No clusters found</h3>
-                    <p className="text-muted-foreground mb-6">
-                      {searchQuery || statusFilter !== 'all' || typeFilter !== 'all' 
-                        ? 'No clusters match your current filters.' 
-                        : 'Create your first cluster to get started.'}
-                    </p>
+                  <div className="text-center py-12">
+                    <p className="text-lg text-muted-foreground">No clusters found</p>
+                    <Button 
+                      variant="outline" 
+                      className="mt-4" 
+                      onClick={handleCreateCluster}
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Create Your First Cluster
+                    </Button>
                   </div>
                 )}
               </TabsContent>
@@ -277,20 +304,22 @@ const Dashboard = () => {
                     {singleClusters.map((cluster) => (
                       <ClusterCard 
                         key={cluster.id} 
-                        cluster={cluster} 
+                        cluster={cluster}
                         onDelete={handleClusterDeleted}
                         onRestart={handleClusterRestarted}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-12 border border-dashed rounded-lg">
-                    <h3 className="text-lg font-medium mb-2">No single clusters found</h3>
-                    <p className="text-muted-foreground mb-6">
-                      {searchQuery || statusFilter !== 'all'
-                        ? 'No single clusters match your current filters.'
-                        : 'Create your first single cluster to get started.'}
-                    </p>
+                  <div className="text-center py-12">
+                    <p className="text-lg text-muted-foreground">No single-node clusters found</p>
+                    <Button 
+                      variant="outline" 
+                      className="mt-4" 
+                      onClick={handleCreateCluster}
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Create Single-Node Cluster
+                    </Button>
                   </div>
                 )}
               </TabsContent>
@@ -302,24 +331,40 @@ const Dashboard = () => {
                     <p>Loading clusters...</p>
                   </div>
                 ) : multiClusters.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {multiClusters.map((cluster) => (
-                      <ClusterCard 
-                        key={cluster.id} 
-                        cluster={cluster} 
-                        onDelete={handleClusterDeleted}
-                        onRestart={handleClusterRestarted}
-                      />
-                    ))}
-                  </div>
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {multiClusters.map((cluster) => (
+                        <ClusterCard 
+                          key={cluster.id} 
+                          cluster={cluster}
+                          onDelete={handleClusterDeleted}
+                          onRestart={handleClusterRestarted}
+                        />
+                      ))}
+                    </div>
+                    {multiClusters.length > 3 && (
+                      <div className="mt-6 text-center">
+                        <Button
+                          variant="outline"
+                          onClick={() => navigate('/multi-cluster')}
+                        >
+                          View All Multi-Clusters
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="text-center py-12 border border-dashed rounded-lg">
-                    <h3 className="text-lg font-medium mb-2">No multi clusters found</h3>
-                    <p className="text-muted-foreground mb-6">
-                      {searchQuery || statusFilter !== 'all'
-                        ? 'No multi clusters match your current filters.'
-                        : 'Migrate a single cluster to create your first multi cluster.'}
+                  <div className="text-center py-12">
+                    <p className="text-lg text-muted-foreground">No multi-clusters found</p>
+                    <p className="text-muted-foreground mb-4">
+                      Multi-clusters allow you to manage workloads across multiple environments
                     </p>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => navigate('/multi-cluster')}
+                    >
+                      Explore Multi-Cluster Management
+                    </Button>
                   </div>
                 )}
               </TabsContent>
@@ -327,6 +372,7 @@ const Dashboard = () => {
           )}
         </div>
       </main>
+      
       <Footer />
     </div>
   );

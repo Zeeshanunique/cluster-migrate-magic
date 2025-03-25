@@ -1,9 +1,8 @@
-
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, Server, MoreHorizontal, Download, RefreshCw, Trash2, CheckSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Cluster, clusterService } from '@/utils/supabase';
 
 import {
@@ -26,7 +25,7 @@ interface ClusterCardProps {
 
 const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user } = useAuth();
   const [isHovered, setIsHovered] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -63,6 +62,12 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
   
   const handleViewCheckpoints = () => {
     navigate('/checkpoints');
+  };
+  
+  const handleViewDetails = (e: React.MouseEvent) => {
+    // Prevent event from bubbling up to the card's onClick
+    e.stopPropagation();
+    navigate(`/cluster/${cluster.id}`);
   };
   
   const handleAction = (action: string) => {
@@ -134,9 +139,10 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-subtle overflow-hidden"
+      className={`bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-subtle overflow-hidden transition-all duration-200 cursor-pointer ${isHovered ? 'shadow-md border-primary/30 scale-[1.01] dark:border-primary/40' : ''}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onClick={() => navigate(`/cluster/${cluster.id}`)}
     >
       <div className="p-6">
         <div className="flex justify-between items-start mb-4">
@@ -150,7 +156,7 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
                   <MoreHorizontal className="h-4 w-4" />
                   <span className="sr-only">More options</span>
                 </Button>
@@ -158,7 +164,7 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => handleAction('Details')}>
+                <DropdownMenuItem onClick={handleViewDetails}>
                   View Details
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleViewCheckpoints}>
@@ -217,7 +223,10 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
       <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
         {cluster.type === 'single' ? (
           <Button 
-            onClick={handleMigrate} 
+            onClick={(e) => {
+              e.stopPropagation();
+              handleMigrate();
+            }} 
             className="w-full"
           >
             Migrate to Multi-Cluster <ChevronRight className="ml-2 h-4 w-4" />
@@ -225,7 +234,10 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
         ) : (
           <Button 
             variant="outline" 
-            onClick={() => handleAction('Manage')} 
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAction('Manage');
+            }} 
             className="w-full"
           >
             Manage Cluster

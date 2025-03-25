@@ -1,8 +1,8 @@
-
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Clock, CheckCircle, AlertTriangle, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 
 import {
   DropdownMenu,
@@ -31,11 +31,16 @@ interface CheckpointCardProps {
     clusterId: string;
     clusterName: string;
   };
+  onDelete: (checkpointId: string) => void;
+  onRestart: (checkpointId: string) => void;
 }
 
-const CheckpointCard = ({ checkpoint }: CheckpointCardProps) => {
+const CheckpointCard = ({ checkpoint, onDelete, onRestart }: CheckpointCardProps) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [isHovered, setIsHovered] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
   
   const statusIcons = {
     'completed': <CheckCircle className="h-5 w-5 text-green-500" />,
@@ -64,6 +69,32 @@ const CheckpointCard = ({ checkpoint }: CheckpointCardProps) => {
   
   const handleAction = (action: string) => {
     toast(`${action} checkpoint: ${checkpoint.name}`);
+  };
+
+  const handleDelete = async () => {
+    if (!user) return;
+    
+    setIsDeleting(true);
+    try {
+      await onDelete(checkpoint.id);
+    } catch (error) {
+      console.error('Error in delete handler:', error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleRestart = async () => {
+    if (!user || checkpoint.status === 'completed') return;
+    
+    setIsRestarting(true);
+    try {
+      await onRestart(checkpoint.id);
+    } catch (error) {
+      console.error('Error in restart handler:', error);
+    } finally {
+      setIsRestarting(false);
+    }
   };
 
   return (
@@ -100,15 +131,16 @@ const CheckpointCard = ({ checkpoint }: CheckpointCardProps) => {
                 <DropdownMenuItem onClick={() => handleAction('View details')}>
                   View Details
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleAction('Duplicate')}>
-                  Duplicate Checkpoint
+                <DropdownMenuItem onClick={handleRestart} disabled={isRestarting || checkpoint.status === 'completed'}>
+                  {isRestarting ? 'Restarting...' : 'Restart Checkpoint'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
-                  onClick={() => handleAction('Delete')}
+                  onClick={handleDelete}
+                  disabled={isDeleting}
                   className="text-red-600 dark:text-red-400"
                 >
-                  Delete Checkpoint
+                  {isDeleting ? 'Deleting...' : 'Delete Checkpoint'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

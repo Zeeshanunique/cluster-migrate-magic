@@ -1,7 +1,6 @@
-
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Server, Upload, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -57,7 +56,7 @@ const kubernetesVersions = [
 
 const ClusterForm = () => {
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [clusterType, setClusterType] = useState<'single' | 'multi'>('single');
   
@@ -131,7 +130,7 @@ const ClusterForm = () => {
         aws_account_id: awsAccountId || undefined,
         aws_role_arn: awsRoleArn || undefined,
       };
-
+      
       const result = await clusterService.createCluster(clusterData, user.id);
       
       if (result) {

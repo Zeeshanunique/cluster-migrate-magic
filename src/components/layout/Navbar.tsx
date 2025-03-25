@@ -1,8 +1,7 @@
-
 import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, ChevronDown } from 'lucide-react';
-import { useUser, SignInButton, SignUpButton, UserButton } from '@clerk/clerk-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Menu, X, ChevronDown, User, LogOut } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -10,13 +9,16 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
-  const { isSignedIn, user } = useUser();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -30,6 +32,29 @@ const Navbar = () => {
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location.pathname]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
+  };
+
+  // Get user initials for avatar
+  const getUserInitials = () => {
+    if (!user?.email) return '?';
+    
+    // Try to get initials from user metadata if available
+    const userName = user.user_metadata?.name;
+    if (userName) {
+      return userName.split(' ')
+        .map((name: string) => name[0])
+        .join('')
+        .toUpperCase()
+        .substring(0, 2);
+    }
+    
+    // Fallback to first letter of email
+    return user.email[0].toUpperCase();
+  };
 
   return (
     <header
@@ -61,7 +86,7 @@ const Navbar = () => {
             Home
           </Link>
           
-          {isSignedIn && (
+          {user && (
             <Link 
               to="/dashboard" 
               className={`text-sm font-medium transition-colors hover:text-primary ${
@@ -79,23 +104,23 @@ const Navbar = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem asChild>
+              <DropdownMenuItem asChild onClick={() => navigate('/migration')}>
                 <Link to="/migration" className="w-full cursor-pointer">
                   Cluster Migration
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
+              <DropdownMenuItem asChild onClick={() => navigate('/checkpoints')}>
                 <Link to="/checkpoints" className="w-full cursor-pointer">
                   Checkpoints
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/" className="w-full cursor-pointer">
+              <DropdownMenuItem asChild onClick={() => navigate('/multi-cluster')}>
+                <Link to="/multi-cluster" className="w-full cursor-pointer">
                   Multi-Cluster Management
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/" className="w-full cursor-pointer">
+              <DropdownMenuItem asChild onClick={() => navigate('/gitops')}>
+                <Link to="/gitops" className="w-full cursor-pointer">
                   GitOps Delivery
                 </Link>
               </DropdownMenuItem>
@@ -111,25 +136,48 @@ const Navbar = () => {
         </nav>
         
         <div className="hidden md:flex items-center space-x-4">
-          {isSignedIn ? (
-            <UserButton 
-              afterSignOutUrl="/"
-              appearance={{
-                elements: {
-                  userButtonAvatarBox: "w-9 h-9"
-                }
-              }}
-            />
+          {user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Avatar className="h-9 w-9 cursor-pointer hover:opacity-80">
+                  <AvatarFallback className="bg-primary text-primary-foreground">
+                    {getUserInitials()}
+                  </AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <div className="flex items-center justify-start gap-2 p-2">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{user.email}</p>
+                    <p className="text-xs leading-none text-muted-foreground">
+                      {user.user_metadata?.name || 'User'}
+                    </p>
+                  </div>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link to="/dashboard" className="cursor-pointer">Dashboard</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/create-cluster" className="cursor-pointer">Create Cluster</Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  className="text-red-500 focus:text-red-500 cursor-pointer"
+                  onClick={handleSignOut}
+                >
+                  <LogOut className="mr-2 h-4 w-4" /> Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : (
             <>
-              <SignInButton mode="modal">
-                <Button variant="outline" size="sm">
-                  Sign In
-                </Button>
-              </SignInButton>
-              <SignUpButton mode="modal">
-                <Button size="sm">Get Started</Button>
-              </SignUpButton>
+              <Button variant="outline" size="sm" onClick={() => navigate('/sign-in')}>
+                Sign In
+              </Button>
+              <Button size="sm" onClick={() => navigate('/sign-up')}>
+                Get Started
+              </Button>
             </>
           )}
         </div>
@@ -153,7 +201,7 @@ const Navbar = () => {
               Home
             </Link>
             
-            {isSignedIn && (
+            {user && (
               <>
                 <Link 
                   to="/dashboard" 
@@ -173,6 +221,18 @@ const Navbar = () => {
                 >
                   Checkpoints
                 </Link>
+                <Link 
+                  to="/multi-cluster" 
+                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
+                >
+                  Multi-Cluster Management
+                </Link>
+                <Link 
+                  to="/gitops" 
+                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
+                >
+                  GitOps Delivery
+                </Link>
               </>
             )}
             
@@ -184,34 +244,43 @@ const Navbar = () => {
             </Link>
             
             <div className="pt-4 flex flex-col space-y-2">
-              {isSignedIn ? (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <UserButton 
-                      afterSignOutUrl="/"
-                      appearance={{
-                        elements: {
-                          userButtonAvatarBox: "w-8 h-8"
-                        }
-                      }}
-                    />
-                    <div className="text-sm font-medium">
-                      {user?.fullName || user?.username}
+              {user ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-primary text-primary-foreground">
+                          {getUserInitials()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="text-sm font-medium">
+                        {user.user_metadata?.name || user.email}
+                      </div>
                     </div>
                   </div>
-                </div>
+                  <Button 
+                    variant="destructive" 
+                    className="w-full mt-4"
+                    onClick={handleSignOut}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" /> Sign out
+                  </Button>
+                </>
               ) : (
                 <>
-                  <SignInButton mode="modal">
-                    <Button variant="outline" className="w-full">
-                      Sign In
-                    </Button>
-                  </SignInButton>
-                  <SignUpButton mode="modal">
-                    <Button className="w-full">
-                      Get Started
-                    </Button>
-                  </SignUpButton>
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => navigate('/sign-in')}
+                  >
+                    Sign In
+                  </Button>
+                  <Button 
+                    className="w-full"
+                    onClick={() => navigate('/sign-up')}
+                  >
+                    Get Started
+                  </Button>
                 </>
               )}
             </div>

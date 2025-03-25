@@ -1,23 +1,22 @@
-
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import ClusterForm from '@/components/clusters/ClusterForm';
 import { toast } from 'sonner';
 
 const CreateCluster = () => {
-  const { isSignedIn, isLoaded } = useUser();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   
   // Redirect to sign in if not authenticated
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
+    if (!loading && !user) {
       toast.error("You must be signed in to create a cluster");
       navigate('/sign-in');
     }
-  }, [isSignedIn, isLoaded, navigate]);
+  }, [user, loading, navigate]);
 
   return (
     <div className="min-h-screen flex flex-col">

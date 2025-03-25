@@ -1,9 +1,9 @@
-
 import { useState, useEffect } from "react";
-import { SignIn as ClerkSignIn } from "@clerk/clerk-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
+import SignInForm from "@/components/auth/SignInForm";
 import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 
 const SignIn = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -12,7 +12,7 @@ const SignIn = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
-    }, 1500); // Adjust the timeout as needed
+    }, 1000); // Adjusted the timeout for better UX
     
     return () => clearTimeout(timer);
   }, []);
@@ -37,27 +37,13 @@ const SignIn = () => {
           </div>
           
           <div className="bg-card rounded-lg border shadow-sm p-6">
-            {isLoading && (
+            {isLoading ? (
               <div className="h-[400px] flex items-center justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
+            ) : (
+              <SignInForm />
             )}
-            
-            <div className={isLoading ? "hidden" : "block"}>
-              <ClerkSignIn 
-                appearance={{
-                  elements: {
-                    rootBox: "w-full",
-                    card: "shadow-none p-0 border-0",
-                    formButtonPrimary: 
-                      "bg-primary hover:bg-primary/90 text-white rounded-md",
-                    footerAction: "text-primary hover:text-primary/90",
-                  }
-                }}
-                signUpUrl="/sign-up"
-                afterSignInUrl="/dashboard"
-              />
-            </div>
           </div>
         </div>
       </motion.main>

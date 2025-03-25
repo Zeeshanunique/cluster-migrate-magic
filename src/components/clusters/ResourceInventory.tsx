@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,20 +8,23 @@ import { Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 interface ResourceInventoryProps {
-  nodes: EKSNodeInfo[];
+  // Pods and PVs are required, but nodes might not be passed
+  nodes?: EKSNodeInfo[];
   pods: EKSPodInfo[];
   persistentVolumes: EKSPVInfo[];
-  loading: boolean;
+  isLoading?: boolean;  // Changed from loading to isLoading
+  loadResources?: () => void; // Added this as it's being passed
   onPodSelectionChange: (pod: EKSPodInfo, selected: boolean) => void;
   onPVSelectionChange: (pv: EKSPVInfo, selected: boolean) => void;
   onSelectAll: (resourceType: 'pods' | 'pvs', selectAll: boolean) => void;
 }
 
 const ResourceInventory: React.FC<ResourceInventoryProps> = ({
-  nodes,
-  pods,
-  persistentVolumes,
-  loading,
+  nodes = [], // Provide a default empty array
+  pods = [], // Provide a default empty array
+  persistentVolumes = [], // Provide a default empty array
+  isLoading = false, // Default to false
+  loadResources,
   onPodSelectionChange,
   onPVSelectionChange,
   onSelectAll
@@ -52,6 +54,27 @@ const ResourceInventory: React.FC<ResourceInventoryProps> = ({
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-medium">Resource Inventory</h3>
+        {loadResources && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadResources}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              'Load Resources'
+            )}
+          </Button>
+        )}
+      </div>
+
       <Tabs defaultValue="nodes">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="nodes">
@@ -65,7 +88,7 @@ const ResourceInventory: React.FC<ResourceInventoryProps> = ({
           </TabsTrigger>
         </TabsList>
         
-        {loading ? (
+        {isLoading ? (
           <div className="flex items-center justify-center p-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>

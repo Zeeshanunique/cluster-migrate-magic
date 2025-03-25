@@ -1,69 +1,32 @@
-# Welcome to your Lovable project
+# KubeMigrate
 
-## Project info
+KubeMigrate is a modern web application for managing Kubernetes cluster migrations.
 
-**URL**: https://lovable.dev/projects/f7c31adb-345e-4a42-a269-8e1b463ee9fd
+## Database Setup
 
-## How can I edit this code?
+**Important:** Before using the application, you need to set up the Supabase database tables.
 
-There are several ways of editing your application.
+The application is currently configured to use mock data if the required database tables don't exist, but for the full functionality, please follow the [database setup guide](docs/setup/database.md).
 
-**Use Lovable**
+## Features
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/f7c31adb-345e-4a42-a269-8e1b463ee9fd) and start prompting.
+- Single-to-Multi Cluster Migration
+- Checkpoint management for migration progress tracking
+- Support for various Kubernetes distributions
+- AWS Integration for cloud-based clusters
 
-Changes made via Lovable will be committed automatically to this repo.
+## Getting Started
 
-**Use your preferred IDE**
+1. Clone this repository
+2. Install dependencies: `npm install`
+3. Set up your Supabase project and database tables as described in the [setup guide](docs/setup/database.md)
+4. Create `.env` file with your Supabase credentials
+5. Start the development server: `npm run dev`
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Technologies Used
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with .
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/f7c31adb-345e-4a42-a269-8e1b463ee9fd) and click on Share -> Publish.
-
-## I want to use a custom domain - is that possible?
-
-We don't support custom domains (yet). If you want to deploy your project under your own domain then we recommend using Netlify. Visit our docs for more details: [Custom domains](https://docs.lovable.dev/tips-tricks/custom-domain/)
+- React with TypeScript
+- Vite for fast development
+- Supabase for backend and authentication
+- ShadcnUI components for a modern, responsive UI
+- TailwindCSS for styling

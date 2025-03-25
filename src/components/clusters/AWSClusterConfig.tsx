@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -7,14 +6,16 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { EKSClusterConfig, generateKubeconfig } from '@/utils/aws';
-import { Loader2, Upload, RefreshCw } from 'lucide-react';
+import { Loader2, Upload, RefreshCw, Check } from 'lucide-react';
 import { toast } from "sonner";
+import { Cluster } from '@/utils/supabase';
 
 interface AWSClusterConfigProps {
   title: string;
   config: EKSClusterConfig;
   onChange: (config: EKSClusterConfig) => void;
-  disabled?: boolean;
+  readOnly?: boolean;
+  clusterData?: Cluster | null;
 }
 
 // List of AWS regions
@@ -34,10 +35,27 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
   title,
   config,
   onChange,
-  disabled = false
+  readOnly = false,
+  clusterData
 }) => {
   const [generatingKubeconfig, setGeneratingKubeconfig] = useState(false);
-  const [showKubeconfig, setShowKubeconfig] = useState(false);
+  const [showKubeconfig, setShowKubeconfig] = useState(!!config.kubeconfig);
+
+  // Initialize from cluster data if available
+  useEffect(() => {
+    if (clusterData && !readOnly) {
+      onChange({
+        ...config,
+        clusterName: clusterData.name,
+        region: clusterData.region,
+        kubeconfig: clusterData.kubeconfig || config.kubeconfig
+      });
+      
+      if (clusterData.kubeconfig) {
+        setShowKubeconfig(true);
+      }
+    }
+  }, [clusterData]);
 
   const handleGenerateKubeconfig = async () => {
     if (!config.clusterName) {
@@ -78,7 +96,12 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-medium">{title}</h3>
+      {readOnly && clusterData && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 px-3 py-2 rounded-md text-sm text-blue-700 dark:text-blue-300 flex items-center">
+          <Check className="h-4 w-4 mr-2" />
+          Connected to {config.clusterName}
+        </div>
+      )}
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -88,7 +111,8 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
             placeholder="eks-cluster-name"
             value={config.clusterName}
             onChange={(e) => onChange({ ...config, clusterName: e.target.value })}
-            disabled={disabled}
+            disabled={readOnly}
+            className={readOnly ? "opacity-80" : ""}
           />
         </div>
         
@@ -97,9 +121,9 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
           <Select
             value={config.region}
             onValueChange={(value) => onChange({ ...config, region: value })}
-            disabled={disabled}
+            disabled={readOnly}
           >
-            <SelectTrigger id={`${title}-region`}>
+            <SelectTrigger id={`${title}-region`} className={readOnly ? "opacity-80" : ""}>
               <SelectValue placeholder="Select AWS Region" />
             </SelectTrigger>
             <SelectContent>
@@ -118,45 +142,51 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
           id={`${title}-use-iam-role`}
           checked={config.useIAMRole}
           onCheckedChange={(checked) => onChange({ ...config, useIAMRole: checked })}
-          disabled={disabled}
+          disabled={readOnly}
         />
-        <Label htmlFor={`${title}-use-iam-role`}>Use IAM Role for authentication</Label>
+        <Label 
+          htmlFor={`${title}-use-iam-role`} 
+          className={readOnly ? "opacity-80" : ""}
+        >
+          Use IAM Role for authentication
+        </Label>
       </div>
       
       <div className="border rounded-md p-4 bg-muted/30">
         <div className="flex items-center justify-between mb-4">
           <h4 className="text-sm font-medium">Kubeconfig</h4>
-          <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleGenerateKubeconfig}
-              disabled={disabled || generatingKubeconfig || !config.clusterName}
-            >
-              {generatingKubeconfig ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4 mr-2" />
-              )}
-              Generate
-            </Button>
-            
-            <div className="relative">
-              <Button variant="outline" size="sm" disabled={disabled} asChild>
-                <label>
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload
-                  <input
-                    type="file"
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    accept=".yaml,.yml,.json,.config"
-                    onChange={handleFileUpload}
-                    disabled={disabled}
-                  />
-                </label>
+          {!readOnly && (
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleGenerateKubeconfig}
+                disabled={generatingKubeconfig || !config.clusterName}
+              >
+                {generatingKubeconfig ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Generate
               </Button>
+              
+              <div className="relative">
+                <Button variant="outline" size="sm" asChild>
+                  <label>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload
+                    <input
+                      type="file"
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      accept=".yaml,.yml,.json,.config"
+                      onChange={handleFileUpload}
+                    />
+                  </label>
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
         
         {(showKubeconfig && config.kubeconfig) ? (
@@ -165,11 +195,11 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
             onChange={(e) => onChange({ ...config, kubeconfig: e.target.value })}
             rows={5}
             className="font-mono text-xs"
-            disabled={disabled}
+            disabled={readOnly}
           />
         ) : (
           <div className="text-center py-8 text-sm text-muted-foreground border border-dashed rounded">
-            No kubeconfig available. Generate or upload one.
+            {readOnly ? "No kubeconfig available" : "No kubeconfig available. Generate or upload one."}
           </div>
         )}
       </div>
