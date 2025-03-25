@@ -1,7 +1,16 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronRight, AlertCircle, Loader2 } from 'lucide-react';
+import { 
+  Check, 
+  ChevronRight, 
+  AlertCircle, 
+  Loader2,
+  Cloud,
+  Database,
+  Server,
+  Shield
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { Button } from '@/components/ui/button';
@@ -15,15 +24,60 @@ import {
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import BlurContainer from '@/components/ui/BlurContainer';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 
+const awsRegions = [
+  { value: "us-east-1", label: "US East (N. Virginia)" },
+  { value: "us-east-2", label: "US East (Ohio)" },
+  { value: "us-west-1", label: "US West (N. California)" },
+  { value: "us-west-2", label: "US West (Oregon)" },
+  { value: "eu-west-1", label: "EU West (Ireland)" },
+  { value: "eu-central-1", label: "EU Central (Frankfurt)" },
+  { value: "ap-northeast-1", label: "Asia Pacific (Tokyo)" },
+  { value: "ap-southeast-1", label: "Asia Pacific (Singapore)" },
+  { value: "ap-southeast-2", label: "Asia Pacific (Sydney)" },
+];
+
 const steps = [
-  { id: 'init', title: 'Initialize Migration', description: 'Preparing your cluster for migration' },
-  { id: 'backup', title: 'Backup Resources', description: 'Backing up all cluster resources and configurations' },
-  { id: 'transform', title: 'Transform Architecture', description: 'Converting single cluster to multi-cluster architecture' },
-  { id: 'auth', title: 'Configure Authentication', description: 'Setting up multi-cluster authentication and permissions' },
-  { id: 'metadata', title: 'Transfer Metadata', description: 'Migrating metadata, labels, and annotations' },
-  { id: 'finalize', title: 'Finalize Migration', description: 'Verifying migration and finalizing the process' },
+  { 
+    id: 'init', 
+    title: 'Connect to AWS EKS Clusters', 
+    description: 'Connect to source and target EKS clusters',
+    icon: <Cloud className="h-4 w-4" />
+  },
+  { 
+    id: 'backup', 
+    title: 'Backup Resources', 
+    description: 'Create snapshots of workloads and persistent volumes',
+    icon: <Database className="h-4 w-4" />
+  },
+  { 
+    id: 'transform', 
+    title: 'Transform Resources', 
+    description: 'Prepare resource manifests for target cluster',
+    icon: <Server className="h-4 w-4" />
+  },
+  { 
+    id: 'auth', 
+    title: 'Configure IAM Roles', 
+    description: 'Set up necessary permissions in target cluster',
+    icon: <Shield className="h-4 w-4" />
+  },
+  { 
+    id: 'deploy', 
+    title: 'Deploy to Target', 
+    description: 'Apply transformed resources to target cluster',
+    icon: <ChevronRight className="h-4 w-4" />
+  },
+  { 
+    id: 'finalize', 
+    title: 'Validate Migration', 
+    description: 'Verify all workloads are running correctly',
+    icon: <Check className="h-4 w-4" />
+  },
 ];
 
 const MigrationWizard = () => {
@@ -35,6 +89,17 @@ const MigrationWizard = () => {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  
+  // AWS EKS specific configuration
+  const [sourceConfig, setSourceConfig] = useState({
+    clusterName: clusterId || '',
+    region: 'us-east-1',
+  });
+  
+  const [targetConfig, setTargetConfig] = useState({
+    clusterName: '',
+    region: 'us-east-1',
+  });
   
   useEffect(() => {
     // Simulate the migration process for demo purposes
@@ -55,9 +120,14 @@ const MigrationWizard = () => {
   }, [status, currentStep]);
   
   const startMigration = () => {
+    if (!sourceConfig.clusterName || !targetConfig.clusterName) {
+      toast.error('Please provide both source and target cluster names');
+      return;
+    }
+    
     setStatus('running');
     setProgress((1 / steps.length) * 100);
-    toast('Migration process started');
+    toast('AWS EKS migration process started');
   };
   
   const resetMigration = () => {
@@ -74,17 +144,102 @@ const MigrationWizard = () => {
   
   const simulateError = () => {
     setStatus('error');
-    setError('Network connectivity issue detected. Please check your connection and try again.');
+    setError('AWS API connectivity issue detected. Please check your AWS credentials and cluster configuration.');
     toast.error('Migration encountered an error');
+  };
+
+  // Render the configuration form for the initial step
+  const renderClusterConfigForm = () => {
+    if (currentStep > 0 || status !== 'idle') {
+      return null;
+    }
+    
+    return (
+      <div className="space-y-4 mb-6 p-4 bg-background/50 rounded-lg border">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <div className="font-medium">Source EKS Cluster</div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="source-cluster">Cluster Name</Label>
+                <Input 
+                  id="source-cluster" 
+                  placeholder="eks-source-cluster" 
+                  value={sourceConfig.clusterName}
+                  onChange={(e) => setSourceConfig({...sourceConfig, clusterName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="source-region">AWS Region</Label>
+                <Select 
+                  value={sourceConfig.region}
+                  onValueChange={(value) => setSourceConfig({...sourceConfig, region: value})}
+                >
+                  <SelectTrigger id="source-region">
+                    <SelectValue placeholder="Select AWS Region" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {awsRegions.map(region => (
+                      <SelectItem key={`source-${region.value}`} value={region.value}>
+                        {region.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-4">
+            <div className="font-medium">Target EKS Cluster</div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="target-cluster">Cluster Name</Label>
+                <Input 
+                  id="target-cluster" 
+                  placeholder="eks-target-cluster" 
+                  value={targetConfig.clusterName}
+                  onChange={(e) => setTargetConfig({...targetConfig, clusterName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="target-region">AWS Region</Label>
+                <Select 
+                  value={targetConfig.region}
+                  onValueChange={(value) => setTargetConfig({...targetConfig, region: value})}
+                >
+                  <SelectTrigger id="target-region">
+                    <SelectValue placeholder="Select AWS Region" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {awsRegions.map(region => (
+                      <SelectItem key={`target-${region.value}`} value={region.value}>
+                        {region.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="mt-4 text-sm text-muted-foreground">
+          <p>This will connect to your AWS EKS clusters using the current IAM credentials.</p>
+          <p>Ensure your IAM user/role has sufficient permissions to access both clusters.</p>
+        </div>
+      </div>
+    );
   };
 
   return (
     <Card className="w-full max-w-3xl mx-auto">
       <CardHeader>
-        <CardTitle className="text-2xl">Cluster Migration Wizard</CardTitle>
+        <CardTitle className="text-2xl">AWS EKS Migration Wizard</CardTitle>
         <CardDescription>
-          {clusterId ? `Migrating cluster ${clusterId} from single to multi-cluster environment` : 
-            'Migrate your Kubernetes cluster from single to multi-cluster'}
+          {sourceConfig.clusterName && targetConfig.clusterName 
+            ? `Migrating from ${sourceConfig.clusterName} (${sourceConfig.region}) to ${targetConfig.clusterName} (${targetConfig.region})` 
+            : 'Migrate your workloads between AWS EKS clusters'}
         </CardDescription>
       </CardHeader>
       
@@ -96,6 +251,8 @@ const MigrationWizard = () => {
             <span>Step {currentStep + 1} of {steps.length}</span>
           </div>
         </div>
+        
+        {renderClusterConfigForm()}
         
         <div className="space-y-6">
           {steps.map((step, index) => (
@@ -123,7 +280,7 @@ const MigrationWizard = () => {
                     <Check className="h-4 w-4" />
                   ) : currentStep === index && status === 'running' ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
+                  ) : step.icon || (
                     <span className="text-sm">{index + 1}</span>
                   )}
                 </div>
@@ -143,7 +300,7 @@ const MigrationWizard = () => {
                         <BlurContainer className="px-4 py-3 text-sm" intensity="light">
                           <div className="flex items-center">
                             <Loader2 className="h-3 w-3 animate-spin mr-2 text-primary" />
-                            <span>Processing {step.id}...</span>
+                            <span>Processing {step.id} for AWS EKS clusters...</span>
                           </div>
                         </BlurContainer>
                       </motion.div>
@@ -193,7 +350,7 @@ const MigrationWizard = () => {
             </Button>
             <Button disabled>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Migrating...
+              Migrating AWS Clusters...
             </Button>
           </>
         )}
