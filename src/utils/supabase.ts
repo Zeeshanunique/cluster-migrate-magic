@@ -142,6 +142,7 @@ export interface Cluster {
   kubeconfig?: string;
   aws_account_id?: string;
   aws_role_arn?: string;
+  eks_cluster_name?: string;
 }
 
 export interface CreateClusterPayload {
@@ -153,6 +154,7 @@ export interface CreateClusterPayload {
   kubeconfig?: string;
   aws_account_id?: string;
   aws_role_arn?: string;
+  eks_cluster_name?: string;
 }
 
 // Cluster service methods
@@ -296,6 +298,7 @@ export const clusterService = {
       aws_account_id?: string;
       aws_role_arn?: string;
       kubeconfig?: string;
+      eks_cluster_name?: string;
     }
   ): Promise<boolean> {
     try {
@@ -324,7 +327,8 @@ export const clusterService = {
           // Only update these fields if they're provided in targetConfig
           name: targetConfig.name || sourceCluster.name,
           region: targetConfig.region || sourceCluster.region,
-          nodes: targetConfig.nodes || sourceCluster.nodes
+          nodes: targetConfig.nodes || sourceCluster.nodes,
+          eks_cluster_name: targetConfig.eks_cluster_name || sourceCluster.eks_cluster_name
         })
         .eq('id', sourceClusterId);
       

@@ -74,7 +74,10 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
     toast(`${action} cluster: ${cluster.name}`);
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    // Prevent navigation to cluster details
+    e.stopPropagation();
+    
     if (!user) return;
     
     if (window.confirm(`Are you sure you want to delete ${cluster.name}?`)) {

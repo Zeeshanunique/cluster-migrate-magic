@@ -71,10 +71,6 @@ const MultiCluster = () => {
     return cluster.name.toLowerCase().includes(searchQuery.toLowerCase());
   });
   
-  const handleCreateCluster = () => {
-    navigate('/create-cluster');
-  };
-
   const handleRetry = () => {
     if (user) {
       setIsLoading(true);
@@ -110,8 +106,8 @@ const MultiCluster = () => {
               </p>
             </div>
             
-            <Button onClick={handleCreateCluster}>
-              <Plus className="mr-2 h-4 w-4" /> Create Cluster
+            <Button onClick={() => navigate('/add-cluster')}>
+              <Plus className="mr-2 h-4 w-4" /> Add Cluster
             </Button>
           </div>
           
@@ -200,9 +196,9 @@ const MultiCluster = () => {
               </p>
               <Button 
                 variant="outline" 
-                onClick={handleCreateCluster}
+                onClick={() => navigate('/add-cluster')}
               >
-                <Plus className="mr-2 h-4 w-4" /> Create Multi-Cluster
+                <Plus className="mr-2 h-4 w-4" /> Add Multi-Cluster
               </Button>
             </div>
           )}

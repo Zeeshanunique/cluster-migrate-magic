@@ -369,9 +369,9 @@ const MigrationWizard = () => {
       }
       
       // Get selected resources
-      const selectedPods = pods.filter(pod => pod.selected);
-      const selectedPVs = persistentVolumes.filter(pv => pv.selected);
-      
+    const selectedPods = pods.filter(pod => pod.selected);
+    const selectedPVs = persistentVolumes.filter(pv => pv.selected);
+    
       if (selectedPods.length === 0 && selectedPVs.length === 0) {
         toast.warning("No resources selected for migration");
         setStatus('error');
@@ -471,7 +471,7 @@ const MigrationWizard = () => {
     setCompatibility({ compatible: false, issues: [] });
     setMigrationProgress({ step: 0, message: '' });
   };
-
+  
   // Finish migration and navigate back to dashboard
   const finishMigration = () => {
     // First ensure the cluster is updated properly in Supabase
@@ -485,7 +485,7 @@ const MigrationWizard = () => {
       toast.error("Migration had errors - please check your cluster status");
       navigate('/dashboard');
     } else {
-      navigate('/dashboard');
+    navigate('/dashboard');
     }
   };
 
@@ -542,9 +542,9 @@ const MigrationWizard = () => {
                     </div>
                   
                     {sourceCluster && (
-                      <AWSClusterConfig 
-                        config={sourceConfig}
-                        onChange={setSourceConfig}
+            <AWSClusterConfig
+              config={sourceConfig}
+              onChange={setSourceConfig}
                         title="Source Cluster"
                         readOnly={sourceConnected}
                         clusterData={sourceCluster}
@@ -603,9 +603,9 @@ const MigrationWizard = () => {
                     </div>
                     
                     {targetCluster && (
-                      <AWSClusterConfig 
-                        config={targetConfig}
-                        onChange={setTargetConfig}
+            <AWSClusterConfig
+              config={targetConfig}
+              onChange={setTargetConfig}
                         title="Target Cluster"
                         readOnly={targetConnected}
                         clusterData={targetCluster}
@@ -627,11 +627,11 @@ const MigrationWizard = () => {
             )}
           </div>
         );
-      
+        
       case 1:
         return (
           <div className="space-y-6 py-4">
-            <ResourceInventory 
+            <ResourceInventory
               pods={pods}
               persistentVolumes={persistentVolumes}
               nodes={nodes}
@@ -653,11 +653,11 @@ const MigrationWizard = () => {
             )}
           </div>
         );
-      
+        
       case 2:
         return (
           <div className="space-y-6 py-4">
-            <CompatibilityCheck 
+            <CompatibilityCheck
               sourceConfig={sourceConfig}
               targetConfig={targetConfig}
               compatibilityResult={compatibility}
@@ -669,12 +669,12 @@ const MigrationWizard = () => {
                 <div>
                   <h3 className="font-medium text-red-800 dark:text-red-300">Error</h3>
                   <p className="text-red-700 dark:text-red-300 mt-1 text-sm">{error}</p>
-                </div>
+            </div>
               </BlurContainer>
             )}
           </div>
         );
-      
+        
       case 3:
         return (
           <div className="space-y-6 py-4">
@@ -729,12 +729,12 @@ const MigrationWizard = () => {
                 <div>
                   <h3 className="font-medium text-red-800 dark:text-red-300">Error</h3>
                   <p className="text-red-700 dark:text-red-300 mt-1 text-sm">{error}</p>
-                </div>
+              </div>
               </BlurContainer>
             )}
           </div>
         );
-      
+        
       case 4:
         return (
           <div className="space-y-6 py-4">
@@ -754,9 +754,9 @@ const MigrationWizard = () => {
                   <p className="text-muted-foreground text-center max-w-md mt-2">
                     {sourceConfig.clusterName} has been successfully migrated to a multi-cluster setup
                     with {targetConfig.clusterName}.
-                  </p>
-                </div>
-                
+              </p>
+            </div>
+            
                 <div className="bg-green-50 dark:bg-green-950/30 p-4 rounded-md">
                   <h4 className="font-medium text-green-800 dark:text-green-300 mb-2">Summary</h4>
                   <ul className="space-y-2 text-sm text-green-700 dark:text-green-300">
@@ -776,13 +776,13 @@ const MigrationWizard = () => {
                       <Check className="h-4 w-4 mr-2" />
                       Created new kubeconfig for multi-cluster setup
                     </li>
-                  </ul>
-                </div>
+              </ul>
+            </div>
               </CardContent>
             </Card>
           </div>
         );
-      
+        
       default:
         return null;
     }
@@ -823,14 +823,14 @@ const MigrationWizard = () => {
             </Button>
           </>
         );
-      
+        
       case 1:
         return (
           <>
             <Button
               variant="outline"
               onClick={() => {
-                setCurrentStep(0);
+              setCurrentStep(0);
                 setProgress(0);
               }}
             >
@@ -853,21 +853,21 @@ const MigrationWizard = () => {
             </Button>
           </>
         );
-      
+        
       case 2:
         return (
           <>
             <Button
               variant="outline"
               onClick={() => {
-                setCurrentStep(1);
+              setCurrentStep(1);
                 setProgress(((currentStep) / steps.length) * 100);
               }}
             >
               Back
             </Button>
-            <Button
-              onClick={startMigration}
+            <Button 
+              onClick={startMigration} 
               disabled={status === 'running' || !compatibility.compatible}
             >
               {status === 'running' ? (
@@ -883,7 +883,7 @@ const MigrationWizard = () => {
             </Button>
           </>
         );
-      
+        
       case 3:
         return (
           <>
@@ -909,19 +909,19 @@ const MigrationWizard = () => {
                 }}
               >
                 Continue <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
+            </Button>
             ) : (
               <Button
                 variant="outline"
                 disabled
               >
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Migrating...
-              </Button>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Migrating...
+            </Button>
             )}
           </>
         );
-      
+        
       case 4:
         return (
           <>
@@ -938,7 +938,7 @@ const MigrationWizard = () => {
             </Button>
           </>
         );
-      
+        
       default:
         return null;
     }
@@ -958,7 +958,7 @@ const MigrationWizard = () => {
         <div className="flex justify-between">
           {steps.map((step, index) => (
             <div 
-              key={step.id}
+              key={step.id} 
               className={`flex flex-col items-center max-w-[100px] text-center ${
                 currentStep >= index 
                   ? 'text-primary'
@@ -975,7 +975,7 @@ const MigrationWizard = () => {
                 }
               `}>
                 {currentStep > index ? (
-                  <Check className="h-4 w-4" />
+                    <Check className="h-4 w-4" />
                 ) : (
                   step.icon
                 )}

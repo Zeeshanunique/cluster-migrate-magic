@@ -40,6 +40,7 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
 }) => {
   const [generatingKubeconfig, setGeneratingKubeconfig] = useState(false);
   const [showKubeconfig, setShowKubeconfig] = useState(!!config.kubeconfig);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   // Initialize from cluster data if available
   useEffect(() => {
@@ -69,6 +70,7 @@ const AWSClusterConfig: React.FC<AWSClusterConfigProps> = ({
       onChange({ ...config, kubeconfig });
       setShowKubeconfig(true);
       toast.success("Kubeconfig generated successfully");
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
       toast.error("Failed to generate kubeconfig");
     } finally {

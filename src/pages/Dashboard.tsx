@@ -117,10 +117,6 @@ const Dashboard = () => {
   const singleClusters = filteredClusters.filter(cluster => cluster.type === 'single');
   const multiClusters = filteredClusters.filter(cluster => cluster.type === 'multi');
   
-  const handleCreateCluster = () => {
-    navigate('/create-cluster');
-  };
-
   const handleRetry = () => {
     if (user) {
       setIsLoading(true);
@@ -150,8 +146,8 @@ const Dashboard = () => {
           <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <h1 className="text-3xl font-bold">Kubernetes Clusters</h1>
             
-            <Button onClick={handleCreateCluster}>
-              <Plus className="mr-2 h-4 w-4" /> Create Cluster
+            <Button onClick={() => navigate('/add-cluster')}>
+              <Plus className="mr-2 h-4 w-4" /> Add Cluster
             </Button>
           </div>
           
@@ -285,9 +281,9 @@ const Dashboard = () => {
                     <Button 
                       variant="outline" 
                       className="mt-4" 
-                      onClick={handleCreateCluster}
+                      onClick={() => navigate('/add-cluster')}
                     >
-                      <Plus className="mr-2 h-4 w-4" /> Create Your First Cluster
+                      <Plus className="mr-2 h-4 w-4" /> Add Your First Cluster
                     </Button>
                   </div>
                 )}
@@ -316,9 +312,9 @@ const Dashboard = () => {
                     <Button 
                       variant="outline" 
                       className="mt-4" 
-                      onClick={handleCreateCluster}
+                      onClick={() => navigate('/add-cluster')}
                     >
-                      <Plus className="mr-2 h-4 w-4" /> Create Single-Node Cluster
+                      <Plus className="mr-2 h-4 w-4" /> Add Single-Node Cluster
                     </Button>
                   </div>
                 )}

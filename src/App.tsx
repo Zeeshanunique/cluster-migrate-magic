@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Migration from "./pages/Migration";
 import Checkpoints from "./pages/Checkpoints";
 import CreateCluster from "./pages/CreateCluster";
+import AddCluster from "./pages/AddCluster";
 import ClusterDetails from "./pages/ClusterDetails";
 import MultiCluster from "./pages/MultiCluster";
 import SignIn from "./pages/SignIn";
@@ -51,7 +52,8 @@ const App = () => (
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/migration" element={<ProtectedRoute><Migration /></ProtectedRoute>} />
               <Route path="/checkpoints" element={<ProtectedRoute><Checkpoints /></ProtectedRoute>} />
-              <Route path="/create-cluster" element={<ProtectedRoute><CreateCluster /></ProtectedRoute>} />
+              <Route path="/create-cluster" element={<Navigate to="/add-cluster" replace />} />
+              <Route path="/add-cluster" element={<ProtectedRoute><AddCluster /></ProtectedRoute>} />
               <Route path="/cluster/:id" element={<ProtectedRoute><ClusterDetails /></ProtectedRoute>} />
               <Route path="/multi-cluster" element={<ProtectedRoute><MultiCluster /></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
