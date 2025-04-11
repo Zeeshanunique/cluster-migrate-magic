@@ -1,0 +1,13 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "iam:PassRole",
+            "Resource": [
+                "arn:aws:iam::644483925103:role/eksClusterRole",
+                "arn:aws:iam::644483925103:role/eksNodeRole"
+            ]
+        }
+    ]
+}
