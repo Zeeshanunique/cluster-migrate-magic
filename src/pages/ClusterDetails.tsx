@@ -31,7 +31,8 @@ import {
   HelpCircle,
   Edit3,
   Save,
-  Copy
+  Copy,
+  User as UserIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -95,13 +96,56 @@ const ClusterDetails = () => {
   const [selectedTenants, setSelectedTenants] = useState<{[key: string]: boolean}>({});
 
   // New state for namespaces and services
+  // Namespace section
   const [namespaces, setNamespaces] = useState<any[]>([]);
-  const [services, setServices] = useState<any[]>([]);
   const [selectedNamespace, setSelectedNamespace] = useState<string>('');
   const [isLoadingNamespaces, setIsLoadingNamespaces] = useState(false);
+  
+  // Node section
+  const [nodes, setNodes] = useState<any[]>([]);
+  const [isLoadingNodes, setIsLoadingNodes] = useState(false);
+  
+  // Workloads section
+  const [pods, setPods] = useState<any[]>([]);
+  const [deployments, setDeployments] = useState<any[]>([]);
+  const [replicaSets, setReplicaSets] = useState<any[]>([]);
+  const [statefulSets, setStatefulSets] = useState<any[]>([]);
+  const [daemonSets, setDaemonSets] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [cronJobs, setCronJobs] = useState<any[]>([]);
+  const [isLoadingWorkloads, setIsLoadingWorkloads] = useState(false);
+  const [workloadsTab, setWorkloadsTab] = useState<string>('pods');
+  
+  // Networking section
+  const [services, setServices] = useState<any[]>([]);
+  const [ingresses, setIngresses] = useState<any[]>([]);
+  const [isLoadingNetworking, setIsLoadingNetworking] = useState(false);
   const [isLoadingServices, setIsLoadingServices] = useState(false);
+  const [networkingTab, setNetworkingTab] = useState<string>('services');
+  
+  // Configurations section
+  const [configMaps, setConfigMaps] = useState<any[]>([]);
+  const [secrets, setSecrets] = useState<any[]>([]);
+  const [resourceQuotas, setResourceQuotas] = useState<any[]>([]);
+  const [limitRanges, setLimitRanges] = useState<any[]>([]);
+  const [isLoadingConfigurations, setIsLoadingConfigurations] = useState(false);
+  const [configurationsTab, setConfigurationsTab] = useState<string>('configmaps');
+  
+  // Storage section
+  const [persistentVolumes, setPersistentVolumes] = useState<any[]>([]);
+  const [persistentVolumeClaims, setPersistentVolumeClaims] = useState<any[]>([]);
+  const [storageClasses, setStorageClasses] = useState<any[]>([]);
+  const [isLoadingStorage, setIsLoadingStorage] = useState(false);
+  const [storageTab, setStorageTab] = useState<string>('pv');
+  
+  // Cluster Info
   const [kubeConfigDetails, setKubeConfigDetails] = useState<any>(null);
   const [isLoadingKubeConfigDetails, setIsLoadingKubeConfigDetails] = useState(false);
+  
+  // Monitoring & Logging
+  const [metrics, setMetrics] = useState<any>(null);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [isLoadingMonitoring, setIsLoadingMonitoring] = useState(false);
 
   useEffect(() => {
     const loadCluster = async () => {
@@ -169,47 +213,77 @@ const ClusterDetails = () => {
   const fetchLiveStatus = async (kubeconfig?: string) => {
     if (!kubeconfig) return;
     
-    setIsLoadingLiveStatus(true);
-    setLiveStatusError(null);
-    
     try {
+      setIsLoadingLiveStatus(true);
+      setConnectionFailed(false);
+      setLiveStatusError(null);
+      
+      // Get Kubernetes current context
+      const contextInfo = await fetchKubeConfigDetails(kubeconfig);
+      
+      // Fetch cluster status data
       const status = await fetchClusterStatus(kubeconfig);
-      setLiveClusterStatus(status);
-      setLastUpdated(new Date().toLocaleTimeString());
-      setConsecutiveFailures(0); // Reset failure counter on success
-      setConnectionFailed(false); // Reset connection failed flag
       
-      // If this is the first successful fetch, set up auto-refresh
-      if (autoRefreshEnabled && !autoRefreshTimerRef.current) {
-        setupAutoRefresh(kubeconfig);
-      }
-    } catch (error: any) {
-      console.error('Error fetching live status:', error);
-      
-      // Increment consecutive failures
-      const newFailureCount = consecutiveFailures + 1;
-      setConsecutiveFailures(newFailureCount);
-      
-      // Set connection failed flag immediately to update UI
-      setConnectionFailed(true);
-
-      // Update local UI immediately, even before updating database
-      if (cluster && cluster.status !== 'failed') {
-        // Update local state to immediately show failed status in UI
-        setCluster({...cluster, status: 'failed'});
-      }
-      
-      // Update cluster status to failed if connection consistently fails
-      if (newFailureCount >= MAX_FAILURES_BEFORE_STATUS_UPDATE && cluster && cluster.status !== 'failed') {
-        try {
-          // Update the cluster status in the database to reflect the connection failure
-          await clusterService.updateCluster(cluster.id, { status: 'failed' });
-          toast.error(`Cluster "${cluster.name}" marked as failed due to connection issues`);
-        } catch (updateError) {
-          console.error('Error updating cluster status:', updateError);
+      if (status) {
+        // Success path
+        setLiveClusterStatus(status);
+        setLastUpdated(new Date().toISOString());
+        setLiveStatusError(null);
+        setConsecutiveFailures(0);
+        setConnectionFailed(false);
+        
+        // Fetch all resources based on the Kubernetes hierarchy
+        fetchNamespaces(kubeconfig);
+        // Call the fetchNodes function
+        if (typeof fetchNodes === 'function') {
+          fetchNodes(kubeconfig);
+        }
+        
+        // If we have a selected namespace, fetch namespace-specific resources
+        if (selectedNamespace) {
+          fetchResourcesForNamespace(kubeconfig, selectedNamespace);
+        }
+        
+        // Check if cluster is of a type that might have EKS information
+        if (cluster && !cluster.eks_cluster_name && status && (status as any).clusterName) {
+          // Update cluster data with EKS name if found
+          const updatedCluster = {
+            ...cluster,
+            eks_cluster_name: (status as any).clusterName || ''
+          } as Cluster;
+          setCluster(updatedCluster);
+          
+          // Attempt to update in DB if cluster entity exists
+          if (cluster.id) {
+            clusterService.updateCluster(cluster.id, {
+              eks_cluster_name: (status as any).clusterName || ''
+            });
+          }
+        }
+      } else {
+        // Error handling
+        setConsecutiveFailures(prev => prev + 1);
+        setConnectionFailed(consecutiveFailures >= MAX_FAILURES_BEFORE_STATUS_UPDATE);
+        
+        if (cluster && cluster.status !== 'failed' && 
+            consecutiveFailures >= MAX_FAILURES_BEFORE_STATUS_UPDATE) {
+          // Update cluster status to failed if too many consecutive failures
+          const updatedCluster = {
+            ...cluster,
+            status: 'failed' as "running" | "pending" | "failed"
+          } as Cluster;
+          setCluster(updatedCluster);
+          
+          // Update in DB if cluster entity exists
+          if (cluster.id) {
+            clusterService.updateCluster(cluster.id, { status: 'failed' });
+          }
         }
       }
-      
+    } catch (error) {
+      console.error('Error fetching live status:', error);
+      setLiveStatusError('Failed to connect to the cluster');
+      setLiveClusterStatus(null);
       // Set specific error messages based on error type
       let errorMessage = 'Failed to fetch live cluster status';
       
@@ -659,11 +733,332 @@ const ClusterDetails = () => {
     }
   };
   
+  // Function to fetch workloads (pods, deployments, replicasets, etc.)
+  const fetchWorkloads = async (kubeconfig: string, namespace: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingWorkloads(true);
+    
+    try {
+      // Fetch pods
+      const podsData = await apiRequest(
+        KUBERNETES_API.GET_PODS,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (podsData && podsData.items) {
+        const podsList = podsData.items.map((pod: any) => ({
+          name: pod.metadata.name,
+          namespace: pod.metadata.namespace,
+          status: pod.status?.phase || 'Unknown',
+          restarts: pod.status?.containerStatuses?.reduce((acc: number, cs: any) => acc + (cs.restartCount || 0), 0) || 0,
+          node: pod.spec?.nodeName || 'Unknown',
+          age: pod.metadata.creationTimestamp,
+          creationTimestamp: pod.metadata.creationTimestamp
+        }));
+        
+        setPods(podsList);
+      }
+      
+      // Fetch deployments
+      const deploymentsData = await apiRequest(
+        KUBERNETES_API.GET_DEPLOYMENTS,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (deploymentsData && deploymentsData.items) {
+        const deploymentsList = deploymentsData.items.map((deployment: any) => ({
+          name: deployment.metadata.name,
+          namespace: deployment.metadata.namespace,
+          replicas: {
+            desired: deployment.spec.replicas,
+            current: deployment.status.replicas,
+            ready: deployment.status.readyReplicas || 0,
+            available: deployment.status.availableReplicas || 0
+          },
+          strategy: deployment.spec.strategy.type,
+          age: deployment.metadata.creationTimestamp,
+          creationTimestamp: deployment.metadata.creationTimestamp
+        }));
+        
+        setDeployments(deploymentsList);
+      }
+      
+      // Similar implementation for other workload types
+      // ReplicaSets, StatefulSets, DaemonSets, Jobs, CronJobs
+      
+    } catch (error) {
+      console.error('Error fetching workloads:', error);
+      toast.error('Failed to fetch workload resources');
+    } finally {
+      setIsLoadingWorkloads(false);
+    }
+  };
+
+  // Function to fetch networking resources (services, ingresses)
+  const fetchNetworking = async (kubeconfig: string, namespace: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingNetworking(true);
+    setIsLoadingServices(true);
+    
+    try {
+      // Fetch services
+      const servicesData = await apiRequest(
+        KUBERNETES_API.GET_SERVICES,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (servicesData && servicesData.items) {
+        const servicesList = servicesData.items.map((service: any) => ({
+          name: service.metadata.name,
+          namespace: service.metadata.namespace,
+          type: service.spec.type,
+          clusterIP: service.spec.clusterIP,
+          externalIP: service.spec.externalIPs?.[0] || service.status?.loadBalancer?.ingress?.[0]?.ip || null,
+          ports: service.spec.ports.map((port: any) => ({
+            port: port.port,
+            targetPort: port.targetPort,
+            nodePort: port.nodePort,
+            protocol: port.protocol
+          })),
+          creationTimestamp: service.metadata.creationTimestamp
+        }));
+        
+        setServices(servicesList);
+      }
+      
+      // Fetch ingresses
+      const ingressesData = await apiRequest(
+        KUBERNETES_API.GET_INGRESSES,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (ingressesData && ingressesData.items) {
+        const ingressesList = ingressesData.items.map((ingress: any) => ({
+          name: ingress.metadata.name,
+          namespace: ingress.metadata.namespace,
+          hosts: ingress.spec.rules?.map((rule: any) => rule.host) || [],
+          ingressClassName: ingress.spec.ingressClassName,
+          tls: ingress.spec.tls && ingress.spec.tls.length > 0,
+          age: ingress.metadata.creationTimestamp,
+          creationTimestamp: ingress.metadata.creationTimestamp
+        }));
+        
+        setIngresses(ingressesList);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching networking resources:', error);
+      toast.error('Failed to fetch networking resources');
+    } finally {
+      setIsLoadingNetworking(false);
+      setIsLoadingServices(false);
+    }
+  };
+
+  // Function to fetch configuration resources (configmaps, secrets, etc.)
+  const fetchConfigurations = async (kubeconfig: string, namespace: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingConfigurations(true);
+    
+    try {
+      // Fetch ConfigMaps
+      const configMapsData = await apiRequest(
+        KUBERNETES_API.GET_CONFIGMAPS,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (configMapsData && configMapsData.items) {
+        const configMapsList = configMapsData.items.map((cm: any) => ({
+          name: cm.metadata.name,
+          namespace: cm.metadata.namespace,
+          dataCount: cm.data ? Object.keys(cm.data).length : 0,
+          age: cm.metadata.creationTimestamp,
+          creationTimestamp: cm.metadata.creationTimestamp
+        }));
+        
+        setConfigMaps(configMapsList);
+      }
+      
+      // Fetch Secrets
+      const secretsData = await apiRequest(
+        KUBERNETES_API.GET_SECRETS,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (secretsData && secretsData.items) {
+        const secretsList = secretsData.items.map((secret: any) => ({
+          name: secret.metadata.name,
+          namespace: secret.metadata.namespace,
+          type: secret.type,
+          dataCount: secret.data ? Object.keys(secret.data).length : 0,
+          age: secret.metadata.creationTimestamp,
+          creationTimestamp: secret.metadata.creationTimestamp
+        }));
+        
+        setSecrets(secretsList);
+      }
+      
+      // Implement similar logic for ResourceQuotas and LimitRanges
+      
+    } catch (error) {
+      console.error('Error fetching configuration resources:', error);
+      toast.error('Failed to fetch configuration resources');
+    } finally {
+      setIsLoadingConfigurations(false);
+    }
+  };
+
+  // Function to fetch storage resources (PVs, PVCs, StorageClasses)
+  const fetchStorage = async (kubeconfig: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingStorage(true);
+    
+    try {
+      // Fetch PVs (cluster-wide resource)
+      const pvsData = await apiRequest(
+        KUBERNETES_API.GET_PERSISTENT_VOLUMES,
+        'POST',
+        { kubeconfig }
+      );
+      
+      if (pvsData && pvsData.items) {
+        const pvsList = pvsData.items.map((pv: any) => ({
+          name: pv.metadata.name,
+          capacity: pv.spec.capacity.storage,
+          accessModes: pv.spec.accessModes,
+          reclaimPolicy: pv.spec.persistentVolumeReclaimPolicy,
+          status: pv.status.phase,
+          claim: pv.spec.claimRef ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : null,
+          storageClass: pv.spec.storageClassName,
+          age: pv.metadata.creationTimestamp,
+          creationTimestamp: pv.metadata.creationTimestamp
+        }));
+        
+        setPersistentVolumes(pvsList);
+      }
+      
+      // Fetch PVCs (namespace-scoped)
+      const pvcsData = await apiRequest(
+        KUBERNETES_API.GET_PERSISTENT_VOLUME_CLAIMS,
+        'POST',
+        { kubeconfig, namespace: selectedNamespace }
+      );
+      
+      if (pvcsData && pvcsData.items) {
+        const pvcsList = pvcsData.items.map((pvc: any) => ({
+          name: pvc.metadata.name,
+          namespace: pvc.metadata.namespace,
+          status: pvc.status.phase,
+          volumeName: pvc.spec.volumeName,
+          capacity: pvc.status.capacity?.storage,
+          accessModes: pvc.spec.accessModes,
+          storageClass: pvc.spec.storageClassName,
+          age: pvc.metadata.creationTimestamp,
+          creationTimestamp: pvc.metadata.creationTimestamp
+        }));
+        
+        setPersistentVolumeClaims(pvcsList);
+      }
+      
+      // Fetch StorageClasses (cluster-wide resource)
+      const scData = await apiRequest(
+        KUBERNETES_API.GET_STORAGE_CLASSES,
+        'POST',
+        { kubeconfig }
+      );
+      
+      if (scData && scData.items) {
+        const scList = scData.items.map((sc: any) => ({
+          name: sc.metadata.name,
+          provisioner: sc.provisioner,
+          reclaimPolicy: sc.reclaimPolicy,
+          volumeBindingMode: sc.volumeBindingMode,
+          allowVolumeExpansion: sc.allowVolumeExpansion,
+          age: sc.metadata.creationTimestamp,
+          creationTimestamp: sc.metadata.creationTimestamp
+        }));
+        
+        setStorageClasses(scList);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching storage resources:', error);
+      toast.error('Failed to fetch storage resources');
+    } finally {
+      setIsLoadingStorage(false);
+    }
+  };
+  
+  // Function to fetch monitoring data
+  const fetchMonitoring = async (kubeconfig: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingMonitoring(true);
+    
+    try {
+      // Fetch metrics
+      const metricsData = await apiRequest(
+        KUBERNETES_API.GET_METRICS,
+        'POST',
+        { kubeconfig }
+      );
+      
+      if (metricsData) {
+        setMetrics(metricsData);
+      }
+      
+      // Fetch logs
+      const logsData = await apiRequest(
+        KUBERNETES_API.GET_LOGS,
+        'POST',
+        { kubeconfig }
+      );
+      
+      if (logsData) {
+        setLogs(logsData);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching monitoring data:', error);
+      toast.error('Failed to fetch monitoring data');
+    } finally {
+      setIsLoadingMonitoring(false);
+    }
+  };
+  
+  // Function to fetch all resources for a namespace
+  const fetchResourcesForNamespace = async (kubeconfig: string, namespace: string) => {
+    if (!kubeconfig) return;
+    
+    // Fetch workloads, networking, configurations, storage, and monitoring for the selected namespace
+    try {
+      await fetchWorkloads(kubeconfig, namespace);
+      await fetchNetworking(kubeconfig, namespace);
+      await fetchConfigurations(kubeconfig, namespace);
+      await fetchStorage(kubeconfig);
+      await fetchMonitoring(kubeconfig);
+    } catch (error) {
+      console.error('Error fetching resources for namespace:', error);
+      toast.error('Failed to fetch resources for namespace');
+    }
+  };
+  
   // Function to fetch namespaces
   const fetchNamespaces = async (kubeconfig: string) => {
     if (!kubeconfig) return;
     
     setIsLoadingNamespaces(true);
+    setLiveStatusError(null);
     
     try {
       const data = await apiRequest(
@@ -681,21 +1076,59 @@ const ClusterDetails = () => {
         
         setNamespaces(namespacesList);
         
-        // Set default namespace and fetch services for it
+        // Set default namespace and fetch resources for it
         if (namespacesList.length > 0) {
           const defaultNs = namespacesList.find((ns: any) => ns.name === 'default') || namespacesList[0];
           setSelectedNamespace(defaultNs.name);
-          fetchServices(kubeconfig, defaultNs.name);
+          fetchResourcesForNamespace(kubeconfig, defaultNs.name);
         }
       }
     } catch (error) {
       console.error('Error fetching namespaces:', error);
+      setLiveStatusError('Network error fetching namespaces');
+      setConsecutiveFailures(prev => prev + 1);
       toast.error('Failed to fetch namespaces');
     } finally {
       setIsLoadingNamespaces(false);
     }
   };
-  
+
+  // Function to fetch nodes
+  const fetchNodes = async (kubeconfig: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingNodes(true);
+    setLiveStatusError(null);
+    
+    try {
+      const data = await apiRequest(
+        KUBERNETES_API.GET_NODES,
+        'POST',
+        { kubeconfig }
+      );
+      
+      if (data && data.items) {
+        const nodesList = data.items.map((node: any) => ({
+          name: node.metadata.name,
+          status: node.status?.conditions?.find((c: any) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady',
+          creationTimestamp: node.metadata.creationTimestamp,
+          kubeletVersion: node.status?.nodeInfo?.kubeletVersion,
+          osImage: node.status?.nodeInfo?.osImage,
+          addresses: node.status?.addresses
+        }));
+        
+        setNodes(nodesList);
+      }
+    } catch (error) {
+      console.error('Error fetching nodes:', error);
+      setLiveStatusError('Network error fetching nodes');
+      setConsecutiveFailures(prev => prev + 1);
+      toast.error('Failed to fetch nodes');
+    } finally {
+      setIsLoadingNodes(false);
+    }
+  };
+
   // Function to fetch services
   const fetchServices = async (kubeconfig: string, namespace: string) => {
     if (!kubeconfig) return;
@@ -710,17 +1143,12 @@ const ClusterDetails = () => {
       );
       
       if (data && data.items) {
-        const servicesList = data.items.map((svc: any) => ({
-          name: svc.metadata.name,
-          namespace: svc.metadata.namespace,
-          type: svc.spec.type,
-          clusterIP: svc.spec.clusterIP,
-          ports: svc.spec.ports.map((port: any) => ({
-            port: port.port,
-            targetPort: port.targetPort,
-            protocol: port.protocol
-          })),
-          creationTimestamp: svc.metadata.creationTimestamp
+        const servicesList = data.items.map((service: any) => ({
+          name: service.metadata.name,
+          type: service.spec.type,
+          clusterIP: service.spec.clusterIP,
+          ports: service.spec.ports,
+          creationTimestamp: service.metadata.creationTimestamp
         }));
         
         setServices(servicesList);
@@ -775,7 +1203,7 @@ const ClusterDetails = () => {
         
         // Always update local UI immediately on manual refresh error
         if (cluster && cluster.status !== 'failed') {
-          setCluster({...cluster, status: 'failed'});
+          setCluster({...cluster, status: 'failed' as "running" | "pending" | "failed"});
         }
         
         // Update cluster status to failed on manual refresh failure
@@ -1107,12 +1535,16 @@ const ClusterDetails = () => {
                             </div>
                           </div>
 
-                          <Tabs defaultValue="nodes" value={activeTab} onValueChange={setActiveTab}>
-                            <TabsList className="mb-4 grid grid-cols-4">
-                              <TabsTrigger value="nodes">Nodes</TabsTrigger>
-                              <TabsTrigger value="pods">Pods</TabsTrigger>
-                              <TabsTrigger value="namespaces">Namespaces</TabsTrigger>
-                              <TabsTrigger value="services">Services</TabsTrigger>
+                          <Tabs defaultValue="namespaces" value={activeTab} onValueChange={setActiveTab}>
+                            <TabsList className="flex overflow-x-auto py-2 space-x-1 bg-slate-100 dark:bg-slate-900 rounded-md p-1">
+                              <TabsTrigger value="namespaces" className="font-medium">Namespaces</TabsTrigger>
+                              <TabsTrigger value="nodes" className="font-medium">Nodes</TabsTrigger>
+                              <TabsTrigger value="workloads" className="font-medium">Workloads</TabsTrigger>
+                              <TabsTrigger value="networking" className="font-medium">Networking</TabsTrigger>
+                              <TabsTrigger value="configurations" className="font-medium">Configurations</TabsTrigger>
+                              <TabsTrigger value="storage" className="font-medium">Storage</TabsTrigger>
+                              <TabsTrigger value="clusterinfo" className="font-medium">Cluster Info</TabsTrigger>
+                              <TabsTrigger value="monitoring" className="font-medium">Monitoring</TabsTrigger>
                             </TabsList>
                             
                             <TabsContent value="nodes">
@@ -1172,49 +1604,257 @@ const ClusterDetails = () => {
                               </div>
                             </TabsContent>
                             
-                            <TabsContent value="pods">
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                  <thead className="bg-gray-50">
-                                    <tr>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Restarts</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Node</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="bg-white divide-y divide-gray-200">
-                                    {liveClusterStatus.pods.map((pod: any) => (
-                                      <tr 
-                                        key={`${pod.namespace}-${pod.name}`}
-                                        className="hover:bg-gray-50 cursor-pointer"
-                                        onClick={() => handlePodClick(pod)}
-                                      >
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{pod.name}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pod.namespace}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                          <Badge className={
-                                            pod.status === 'Running' ? 'bg-green-500' : 
-                                            pod.status === 'Pending' ? 'bg-yellow-500' : 
-                                            pod.status === 'Succeeded' ? 'bg-blue-500' : 'bg-red-500'
-                                          }>
-                                            {pod.status}
-                                          </Badge>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                          {pod.restarts > 0 ? (
-                                            <span className="text-red-500 font-medium">{pod.restarts}</span>
-                                          ) : pod.restarts}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pod.node}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pod.age}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                            <TabsContent value="workloads" className="pt-4">
+                              <div className="mb-4 bg-blue-50 dark:bg-blue-950/20 p-3 rounded-md border border-blue-100 dark:border-blue-900/40">
+                                <h3 className="text-sm font-medium text-blue-800 dark:text-blue-300 flex items-center mb-1">
+                                  <Server className="h-4 w-4 mr-2" /> Workloads
+                                </h3>
+                                <p className="text-xs text-blue-600 dark:text-blue-400">Manage your application workloads like Pods, Deployments, StatefulSets and more.</p>
                               </div>
+                              <Tabs value={workloadsTab} onValueChange={setWorkloadsTab}>
+                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-blue-50 dark:bg-blue-950/30 rounded-md p-1 border border-blue-100 dark:border-blue-900">
+                                  <TabsTrigger value="pods" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Pods</TabsTrigger>
+                                  <TabsTrigger value="deployments" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Deployments</TabsTrigger>
+                                  <TabsTrigger value="replicasets" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">ReplicaSets</TabsTrigger>
+                                  <TabsTrigger value="statefulsets" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">StatefulSets</TabsTrigger>
+                                  <TabsTrigger value="daemonsets" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">DaemonSets</TabsTrigger>
+                                  <TabsTrigger value="jobs" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Jobs</TabsTrigger>
+                                  <TabsTrigger value="cronjobs" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">CronJobs</TabsTrigger>
+                                </TabsList>
+                                
+                                <TabsContent value="pods">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Restarts</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Node</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {liveClusterStatus.pods.map((pod: any) => (
+                                          <tr 
+                                            key={`${pod.namespace}-${pod.name}`}
+                                            className="hover:bg-gray-50 cursor-pointer"
+                                            onClick={() => handlePodClick(pod)}
+                                          >
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{pod.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pod.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                              <Badge className={
+                                                pod.status === 'Running' ? 'bg-green-500' : 
+                                                pod.status === 'Pending' ? 'bg-yellow-500' : 
+                                                pod.status === 'Succeeded' ? 'bg-blue-500' : 'bg-red-500'
+                                              }>
+                                                {pod.status}
+                                              </Badge>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {pod.restarts > 0 ? (
+                                                <span className="text-red-500 font-medium">{pod.restarts}</span>
+                                              ) : pod.restarts}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pod.node}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pod.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="deployments">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Replicas</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Strategy</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {deployments.map((deployment: any) => (
+                                          <tr key={`${deployment.namespace}-${deployment.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{deployment.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {deployment.replicas.current}/{deployment.replicas.desired}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {deployment.replicas.available}/{deployment.replicas.desired}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.strategy}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="replicasets">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Desired</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {replicaSets.map((rs: any) => (
+                                          <tr key={`${rs.namespace}-${rs.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{rs.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.replicas.desired}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.replicas.current}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.ownerReference || '-'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="statefulsets">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Replicas</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Update Strategy</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {statefulSets.map((sts: any) => (
+                                          <tr key={`${sts.namespace}-${sts.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sts.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {sts.replicas.current}/{sts.replicas.desired}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.serviceName}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.updateStrategy}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="daemonsets">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Desired</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ready</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Update Strategy</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {daemonSets.map((ds: any) => (
+                                          <tr key={`${ds.namespace}-${ds.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ds.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.desiredNumberScheduled}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.currentNumberScheduled}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.numberReady}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.updateStrategy}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="jobs">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completions</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Succeeded</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Failed</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {jobs.map((job: any) => (
+                                          <tr key={`${job.namespace}-${job.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{job.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.completions}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.active}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.succeeded}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.failed}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="cronjobs">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Suspend</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Schedule</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {cronJobs.map((cj: any) => (
+                                          <tr key={`${cj.namespace}-${cj.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cj.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.schedule}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {cj.suspend ? 'Yes' : 'No'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.active}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.lastScheduleTime || '-'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.age}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                              </Tabs>
                             </TabsContent>
                             
                             <TabsContent value="namespaces">
@@ -1247,34 +1887,561 @@ const ClusterDetails = () => {
                               </div>
                             </TabsContent>
                             
-                            <TabsContent value="services">
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                  <thead className="bg-gray-50">
-                                    <tr>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cluster IP</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ports</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="bg-white divide-y divide-gray-200">
-                                    {services.map((svc: any) => (
-                                      <tr key={svc.name}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{svc.name}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.namespace}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.type}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.clusterIP}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                          {svc.ports.map((port: any) => (
-                                            <div key={port.port}>{port.port}/{port.protocol}</div>
-                                          ))}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                            <TabsContent value="networking" className="pt-4">
+                              <div className="mb-4 bg-green-50 dark:bg-green-950/20 p-3 rounded-md border border-green-100 dark:border-green-900/40">
+                                <h3 className="text-sm font-medium text-green-800 dark:text-green-300 flex items-center mb-1">
+                                  <Network className="h-4 w-4 mr-2" /> Networking
+                                </h3>
+                                <p className="text-xs text-green-600 dark:text-green-400">Configure network services, load balancing, and external access points.</p>
+                              </div>
+                              <Tabs defaultValue="services" value={networkingTab} onValueChange={setNetworkingTab}>
+                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-green-50 dark:bg-green-950/30 rounded-md p-1 border border-green-100 dark:border-green-900">
+                                  <TabsTrigger value="services" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Services</TabsTrigger>
+                                  <TabsTrigger value="ingresses" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Ingresses</TabsTrigger>
+                                </TabsList>
+                                
+                                <TabsContent value="services">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cluster IP</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">External IP</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ports</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {services.map((svc: any) => (
+                                          <tr key={`${svc.namespace}-${svc.name}`}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{svc.name}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.namespace}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              <Badge className={
+                                                svc.type === 'LoadBalancer' ? 'bg-blue-100 text-blue-800' :
+                                                svc.type === 'NodePort' ? 'bg-purple-100 text-purple-800' :
+                                                svc.type === 'ExternalName' ? 'bg-yellow-100 text-yellow-800' :
+                                                'bg-gray-100 text-gray-800'
+                                              }>
+                                                {svc.type}
+                                              </Badge>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.clusterIP}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.externalIP || '-'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {svc.ports.map((port: any) => (
+                                                <div key={`${port.port}-${port.protocol}`}>
+                                                  {port.port}:{port.nodePort || port.port}/{port.protocol}
+                                                </div>
+                                              ))}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="ingresses">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hosts</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ingress Class</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TLS</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {ingresses.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No ingress resources found in this namespace
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          ingresses.map((ingress: any) => (
+                                            <tr key={`${ingress.namespace}-${ingress.name}`}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ingress.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ingress.namespace}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {ingress.hosts?.map((host: string) => (
+                                                  <div key={host}>{host}</div>
+                                                )) || '-'}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ingress.ingressClassName || '-'}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {ingress.tls ? 'Enabled' : 'Disabled'}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ingress.age}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                              </Tabs>
+                            </TabsContent>
+                            <TabsContent value="configurations" className="pt-4">
+                              <div className="mb-4 bg-purple-50 dark:bg-purple-950/20 p-3 rounded-md border border-purple-100 dark:border-purple-900/40">
+                                <h3 className="text-sm font-medium text-purple-800 dark:text-purple-300 flex items-center mb-1">
+                                  <Database className="h-4 w-4 mr-2" /> Configurations
+                                </h3>
+                                <p className="text-xs text-purple-600 dark:text-purple-400">Manage configuration data, secrets, and resource constraints for your applications.</p>
+                              </div>
+                              <Tabs value={configurationsTab} onValueChange={setConfigurationsTab}>
+                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-purple-50 dark:bg-purple-950/30 rounded-md p-1 border border-purple-100 dark:border-purple-900">
+                                  <TabsTrigger value="configmaps" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">ConfigMaps</TabsTrigger>
+                                  <TabsTrigger value="secrets" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Secrets</TabsTrigger>
+                                  <TabsTrigger value="resourcequotas" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">ResourceQuotas</TabsTrigger>
+                                  <TabsTrigger value="limitranges" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">LimitRanges</TabsTrigger>
+                                </TabsList>
+                                
+                                <TabsContent value="configmaps">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data Items</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {configMaps.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No ConfigMaps found in this namespace
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          configMaps.map((cm: any) => (
+                                            <tr key={`${cm.namespace}-${cm.name}`}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cm.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cm.namespace}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cm.dataCount || 0}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cm.age}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="secrets">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data Items</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {secrets.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No Secrets found in this namespace
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          secrets.map((secret: any) => (
+                                            <tr key={`${secret.namespace}-${secret.name}`}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{secret.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.namespace}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.type}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.dataCount || 0}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.age}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="resourcequotas">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Used</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hard Limit</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {resourceQuotas.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No ResourceQuotas found in this namespace
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          resourceQuotas.flatMap((quota: any) => 
+                                            Object.entries(quota.resources || {}).map(([resource, values]: [string, any]) => (
+                                              <tr key={`${quota.namespace}-${quota.name}-${resource}`}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{quota.name}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{quota.namespace}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{resource}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{values.used || '0'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{values.hard || 'Not Set'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{quota.age}</td>
+                                              </tr>
+                                            ))
+                                          )
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="limitranges">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Default</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {limitRanges.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No LimitRanges found in this namespace
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          limitRanges.flatMap((limit: any) => 
+                                            (limit.limits || []).map((limitItem: any, index: number) => (
+                                              <tr key={`${limit.namespace}-${limit.name}-${index}`}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{limit.name}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limit.namespace}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.type}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.resource}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.min || '-'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.max || '-'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.default || '-'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limit.age}</td>
+                                              </tr>
+                                            ))
+                                          )
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                              </Tabs>
+                            </TabsContent>
+                            
+                            <TabsContent value="storage" className="pt-4">
+                              <div className="mb-4 bg-amber-50 dark:bg-amber-950/20 p-3 rounded-md border border-amber-100 dark:border-amber-900/40">
+                                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 flex items-center mb-1">
+                                  <Database className="h-4 w-4 mr-2" /> Storage
+                                </h3>
+                                <p className="text-xs text-amber-600 dark:text-amber-400">Manage persistent storage resources for your cluster's applications.</p>
+                              </div>
+                              <Tabs value={storageTab} onValueChange={setStorageTab}>
+                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-amber-50 dark:bg-amber-950/30 rounded-md p-1 border border-amber-100 dark:border-amber-900">
+                                  <TabsTrigger value="persistentvolumes" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Persistent Volumes</TabsTrigger>
+                                  <TabsTrigger value="persistentvolumeclaims" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Persistent Volume Claims</TabsTrigger>
+                                  <TabsTrigger value="storageclasses" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Storage Classes</TabsTrigger>
+                                </TabsList>
+                                
+                                <TabsContent value="persistentvolumes">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Capacity</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Access Modes</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reclaim Policy</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Claim</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Storage Class</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {persistentVolumes.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No PersistentVolumes found
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          persistentVolumes.map((pv: any) => (
+                                            <tr key={pv.name}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{pv.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pv.capacity}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pv.accessModes.join(', ')}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pv.reclaimPolicy}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <Badge className={
+                                                  pv.status === 'Bound' ? 'bg-green-100 text-green-800' :
+                                                  pv.status === 'Available' ? 'bg-blue-100 text-blue-800' :
+                                                  pv.status === 'Released' ? 'bg-yellow-100 text-yellow-800' :
+                                                  'bg-gray-100 text-gray-800'
+                                                }>
+                                                  {pv.status}
+                                                </Badge>
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pv.claim || '-'}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pv.storageClass}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pv.age}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="persistentvolumeclaims">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Volume</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Capacity</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Access Modes</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Storage Class</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {persistentVolumeClaims.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No PersistentVolumeClaims found in this namespace
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          persistentVolumeClaims.map((pvc: any) => (
+                                            <tr key={`${pvc.namespace}-${pvc.name}`}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{pvc.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pvc.namespace}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <Badge className={
+                                                  pvc.status === 'Bound' ? 'bg-green-100 text-green-800' :
+                                                  pvc.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                                                  'bg-gray-100 text-gray-800'
+                                                }>
+                                                  {pvc.status}
+                                                </Badge>
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pvc.volumeName || '-'}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pvc.capacity || '-'}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pvc.accessModes.join(', ')}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pvc.storageClass}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pvc.age}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                                
+                                <TabsContent value="storageclasses">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provisioner</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reclaim Policy</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Volume Binding Mode</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Allow Volume Expansion</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {storageClasses.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No StorageClasses found
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          storageClasses.map((sc: any) => (
+                                            <tr key={sc.name}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sc.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sc.provisioner}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sc.reclaimPolicy}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sc.volumeBindingMode}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sc.allowVolumeExpansion ? 'Yes' : 'No'}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sc.age}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </TabsContent>
+                              </Tabs>
+                            </TabsContent>
+                            
+                            <TabsContent value="clusterinfo">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div>
+                                  <h2 className="text-xl font-medium mb-4">Cluster Information</h2>
+                                  
+                                  <dl className="grid grid-cols-1 gap-4">
+                                    <div className="flex items-start">
+                                      <dt className="w-32 font-medium flex items-center">
+                                        <Server className="h-4 w-4 mr-2 opacity-70" /> Provider:
+                                      </dt>
+                                      <dd>
+                                        {getTypeBadge(cluster.type)}
+                                      </dd>
+                                    </div>
+                                    
+                                    <div className="flex items-center">
+                                      <dt className="w-32 font-medium flex items-center">
+                                        <Cpu className="h-4 w-4 mr-2 opacity-70" /> Version:
+                                      </dt>
+                                      <dd>Kubernetes v{cluster.version}</dd>
+                                    </div>
+                                    
+                                    <div className="flex items-center">
+                                      <dt className="w-32 font-medium flex items-center">
+                                        <Network className="h-4 w-4 mr-2 opacity-70" /> API Server:
+                                      </dt>
+                                      <dd className="text-sm font-mono">{kubeConfigDetails?.server || 'Unknown'}</dd>
+                                    </div>
+                                    
+                                    <div className="flex items-center">
+                                      <dt className="w-32 font-medium flex items-center">
+                                        <Globe className="h-4 w-4 mr-2 opacity-70" /> Region:
+                                      </dt>
+                                      <dd>{cluster.region}</dd>
+                                    </div>
+                                    
+                                    <div className="flex items-center">
+                                      <dt className="w-32 font-medium flex items-center">
+                                        <UserIcon className="h-4 w-4 mr-2 opacity-70" /> Auth Type:
+                                      </dt>
+                                      <dd>{kubeConfigDetails?.authType || 'Unknown'}</dd>
+                                    </div>
+                                  </dl>
+                                </div>
+                                
+                                {cluster.aws_account_id && (
+                                  <div>
+                                    <h2 className="text-xl font-medium mb-4">AWS Information</h2>
+                                    <dl className="grid grid-cols-1 gap-4">
+                                      <div className="flex items-center">
+                                        <dt className="w-32 font-medium">Account ID:</dt>
+                                        <dd className="font-mono">{cluster.aws_account_id}</dd>
+                                      </div>
+                                      
+                                      <div className="flex items-center">
+                                        <dt className="w-32 font-medium">EKS Cluster:</dt>
+                                        <dd className="font-mono">{cluster.eks_cluster_name}</dd>
+                                      </div>
+                                    </dl>
+                                  </div>
+                                )}
+                              </div>
+                            </TabsContent>
+                            
+                            <TabsContent value="monitoring" className="pt-4">
+                              <div className="mb-4 bg-cyan-50 dark:bg-cyan-950/20 p-3 rounded-md border border-cyan-100 dark:border-cyan-900/40">
+                                <h3 className="text-sm font-medium text-cyan-800 dark:text-cyan-300 flex items-center mb-1">
+                                  <BarChart3 className="h-4 w-4 mr-2" /> Monitoring & Logging
+                                </h3>
+                                <p className="text-xs text-cyan-600 dark:text-cyan-400">View performance metrics and system logs from your cluster's components.</p>
+                              </div>
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                  <h2 className="text-lg font-medium mb-4">Cluster Resource Usage</h2>
+                                  
+                                  <div className="space-y-6">
+                                    <div>
+                                      <div className="flex justify-between mb-1">
+                                        <span className="text-sm font-medium">CPU Usage</span>
+                                        <span className="text-sm text-gray-500">
+                                          {metrics?.cpu?.used || '0'} / {metrics?.cpu?.total || '0'} cores
+                                        </span>
+                                      </div>
+                                      <Progress value={metrics?.cpu?.percentUsed || 0} 
+                                        className="h-2 w-full bg-gray-200" 
+                                        indicatorClassName={`${(metrics?.cpu?.percentUsed || 0) > 80 ? 'bg-red-500' : (metrics?.cpu?.percentUsed || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
+                                      />
+                                    </div>
+                                    
+                                    <div>
+                                      <div className="flex justify-between mb-1">
+                                        <span className="text-sm font-medium">Memory Usage</span>
+                                        <span className="text-sm text-gray-500">
+                                          {metrics?.memory?.used || '0'} / {metrics?.memory?.total || '0'}
+                                        </span>
+                                      </div>
+                                      <Progress value={metrics?.memory?.percentUsed || 0} 
+                                        className="h-2 w-full bg-gray-200" 
+                                        indicatorClassName={`${(metrics?.memory?.percentUsed || 0) > 80 ? 'bg-red-500' : (metrics?.memory?.percentUsed || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
+                                      />
+                                    </div>
+                                    
+                                    <div>
+                                      <div className="flex justify-between mb-1">
+                                        <span className="text-sm font-medium">Pod Capacity</span>
+                                        <span className="text-sm text-gray-500">
+                                          {metrics?.pods?.used || '0'} / {metrics?.pods?.total || '0'} pods
+                                        </span>
+                                      </div>
+                                      <Progress value={metrics?.pods?.percentUsed || 0} 
+                                        className="h-2 w-full bg-gray-200" 
+                                        indicatorClassName={`${(metrics?.pods?.percentUsed || 0) > 80 ? 'bg-red-500' : (metrics?.pods?.percentUsed || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                  <h2 className="text-lg font-medium mb-4">Recent Logs</h2>
+                                  
+                                  {logs.length === 0 ? (
+                                    <div className="text-center py-8 text-gray-500">
+                                      <HelpCircle className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                      <p>No logs available</p>
+                                    </div>
+                                  ) : (
+                                    <ScrollArea className="h-96">
+                                      <pre className="text-xs font-mono whitespace-pre-wrap p-3 bg-gray-50 rounded border border-gray-200">
+                                        {logs.map((log: string, index: number) => (
+                                          <div key={index} className="pb-1">{log}</div>
+                                        ))}
+                                      </pre>
+                                    </ScrollArea>
+                                  )}
+                                </div>
                               </div>
                             </TabsContent>
                           </Tabs>
@@ -1412,77 +2579,77 @@ const ClusterDetails = () => {
                       <div>
                         <h3 className="text-lg font-medium mb-2">Contexts</h3>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                          {kubeConfigDetails.contexts.map((context: any, index: number) => (
-                            <div 
-                              key={index} 
-                              className={`border rounded-md p-4 ${context.name === kubeConfigDetails.currentContext ? 
-                                'bg-blue-50 border-blue-300' : 'bg-gray-50'}`}
-                            >
-                              <h4 className="font-medium mb-2 flex items-center">
-                                {context.name}
-                                {context.name === kubeConfigDetails.currentContext && (
-                                  <Badge className="ml-2 bg-blue-500">Current</Badge>
-                                )}
-                              </h4>
-                              <div className="space-y-1">
-                                <p className="text-sm"><span className="font-medium">Cluster:</span> {context.cluster}</p>
-                                <p className="text-sm"><span className="font-medium">User:</span> {context.user}</p>
-                                {context.namespace && (
-                                  <p className="text-sm"><span className="font-medium">Namespace:</span> {context.namespace}</p>
-                                )}
+                            {kubeConfigDetails.contexts.map((context: any, index: number) => (
+                              <div 
+                                key={index} 
+                                className={`border rounded-md p-4 ${context.name === kubeConfigDetails.currentContext ? 
+                                  'bg-blue-50 border-blue-300' : 'bg-gray-50'}`}
+                              >
+                                <h4 className="font-medium mb-2 flex items-center">
+                                  {context.name}
+                                  {context.name === kubeConfigDetails.currentContext && (
+                                    <Badge className="ml-2 bg-blue-500">Current</Badge>
+                                  )}
+                                </h4>
+                                <div className="space-y-1">
+                                  <p className="text-sm"><span className="font-medium">Cluster:</span> {context.cluster}</p>
+                                  <p className="text-sm"><span className="font-medium">User:</span> {context.user}</p>
+                                  {context.namespace && (
+                                    <p className="text-sm"><span className="font-medium">Namespace:</span> {context.namespace}</p>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      {/* Display users information */}
-                      <div>
-                        <h3 className="text-lg font-medium mb-2">Users</h3>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                          {kubeConfigDetails.users.map((user: any, index: number) => (
-                            <div key={index} className="border rounded-md p-4 bg-gray-50">
-                              <h4 className="font-medium mb-2">{user.name}</h4>
-                              <div className="space-y-1">
-                                <p className="text-sm">
-                                  <span className="font-medium">Auth Type:</span> 
-                                  <Badge className="ml-1">
-                                    {user.authType.charAt(0).toUpperCase() + user.authType.slice(1)}
-                                  </Badge>
-                                </p>
-                                {user.execCommand && (
-                                  <div>
-                                    <p className="text-sm font-medium">Command:</p>
-                                    <code className="text-xs bg-gray-100 p-1 rounded block mt-1">
-                                      {user.execCommand} {user.execArgs ? user.execArgs.join(' ') : ''}
-                                    </code>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      {/* Display AWS specific info if available */}
-                      {kubeConfigDetails.awsInfo && (
-                        <div>
-                          <h3 className="text-lg font-medium mb-2">AWS Information</h3>
-                          <div className="border rounded-md p-4 bg-gray-50">
-                            <div className="space-y-1">
-                              {kubeConfigDetails.awsInfo.clusterName && (
-                                <p className="text-sm"><span className="font-medium">EKS Cluster Name:</span> {kubeConfigDetails.awsInfo.clusterName}</p>
-                              )}
-                              {kubeConfigDetails.awsInfo.region && (
-                                <p className="text-sm"><span className="font-medium">AWS Region:</span> {kubeConfigDetails.awsInfo.region}</p>
-                              )}
-                              {kubeConfigDetails.awsInfo.accountId && (
-                                <p className="text-sm"><span className="font-medium">AWS Account ID:</span> {kubeConfigDetails.awsInfo.accountId}</p>
-                              )}
-                            </div>
+                            ))}
                           </div>
                         </div>
-                      )}
+                        
+                        {/* Display users information */}
+                        <div>
+                          <h3 className="text-lg font-medium mb-2">Users</h3>
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            {kubeConfigDetails.users.map((user: any, index: number) => (
+                              <div key={index} className="border rounded-md p-4 bg-gray-50">
+                                <h4 className="font-medium mb-2">{user.name}</h4>
+                                <div className="space-y-1">
+                                  <p className="text-sm">
+                                    <span className="font-medium">Auth Type:</span> 
+                                    <Badge className="ml-1">
+                                      {user.authType.charAt(0).toUpperCase() + user.authType.slice(1)}
+                                    </Badge>
+                                  </p>
+                                  {user.execCommand && (
+                                    <div>
+                                      <p className="text-sm font-medium">Command:</p>
+                                      <code className="text-xs bg-gray-100 p-1 rounded block mt-1">
+                                        {user.execCommand} {user.execArgs ? user.execArgs.join(' ') : ''}
+                                      </code>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        {/* Display AWS specific info if available */}
+                        {kubeConfigDetails.awsInfo && (
+                          <div>
+                            <h3 className="text-lg font-medium mb-2">AWS Information</h3>
+                            <div className="border rounded-md p-4 bg-gray-50">
+                              <div className="space-y-1">
+                                {kubeConfigDetails.awsInfo.clusterName && (
+                                  <p className="text-sm"><span className="font-medium">EKS Cluster Name:</span> {kubeConfigDetails.awsInfo.clusterName}</p>
+                                )}
+                                {kubeConfigDetails.awsInfo.region && (
+                                  <p className="text-sm"><span className="font-medium">AWS Region:</span> {kubeConfigDetails.awsInfo.region}</p>
+                                )}
+                                {kubeConfigDetails.awsInfo.accountId && (
+                                  <p className="text-sm"><span className="font-medium">AWS Account ID:</span> {kubeConfigDetails.awsInfo.accountId}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                     </div>
                   ) : (
                     <div className="text-center p-6">
