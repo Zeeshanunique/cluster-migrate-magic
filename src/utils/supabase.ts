@@ -381,6 +381,8 @@ export interface Checkpoint {
   progress: number;
   clusterId: string;
   owner_id: string;
+  clusterName?: string;
+  lastUpdated?: string;
 }
 
 export interface CreateCheckpointPayload {

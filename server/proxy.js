@@ -857,19 +857,124 @@ app.post('/api/k8s/pod-yaml', async (req, res) => {
   }
 });
 
+// Helper function to make Kubernetes API requests with token refresh retry for EKS
+async function makeK8sRequestWithRetry(kubeconfig, apiPath, method = 'GET') {
+  return new Promise(async (resolve, reject) => {
+    let attempts = 0;
+    const maxAttempts = 2; // Initial attempt + 1 retry with fresh token
+
+    const tryRequest = async (tokenToUse) => {
+      attempts++;
+      try {
+        const clusterEndpoint = getClusterEndpoint(kubeconfig);
+        const caCert = extractCaCert(kubeconfig);
+        const apiUrl = `${clusterEndpoint}${apiPath}`; // Combine endpoint and path
+
+        console.log(`Making K8s request (Attempt ${attempts}) to ${apiUrl} with token prefix: ${tokenToUse.substring(0, 20)}...`);
+
+        const requestOptions = {
+          method: method,
+          headers: {
+            'Authorization': `Bearer ${tokenToUse}`,
+            'Accept': 'application/json'
+          },
+          ...(caCert && {
+            ca: Buffer.from(caCert, 'base64').toString('ascii'),
+            // Disable validation only for development, use rejectUnauthorized: true in production
+            rejectUnauthorized: process.env.NODE_ENV !== 'production' ? false : true 
+          })
+        };
+
+        // Add NODE_TLS_REJECT_UNAUTHORIZED warning suppression if needed
+        if (process.env.NODE_ENV !== 'production') {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+          console.warn('IMPORTANT: TLS certificate validation is disabled. Use only for development.');
+        } else {
+          // Ensure it's set back to default if in production
+          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        }
+
+        const request = https.request(apiUrl, requestOptions, (response) => {
+          let data = '';
+          response.on('data', (chunk) => data += chunk);
+          response.on('end', async () => {
+            try {
+              if (response.statusCode === 200) {
+                console.log(`K8s request to ${apiPath} successful (Status ${response.statusCode})`);
+                resolve(JSON.parse(data));
+              } else if (response.statusCode === 401 && attempts < maxAttempts) {
+                console.warn(`K8s request failed with 401 (Attempt ${attempts}). Checking for EKS config to refresh token.`);
+                const eksInfo = extractAwsEksInfo(kubeconfig);
+                if (eksInfo && eksInfo.clusterName && eksInfo.region) {
+                  console.log('EKS config found. Attempting to generate a fresh token.');
+                  try {
+                    const freshToken = await generateAwsEksToken(eksInfo.clusterName, eksInfo.region);
+                    console.log('Successfully generated fresh AWS EKS token.');
+                    // Update the environment variable potentially? Or just use for retry? Let's use just for retry.
+                    // process.env.VITE_K8S_AUTH_TOKEN = freshToken; // Consider updating the env var?
+                    await tryRequest(freshToken); // Retry with the fresh token
+                  } catch (tokenError) {
+                    console.error('Failed to generate fresh EKS token:', tokenError);
+                    reject({ statusCode: 401, error: `Failed to refresh EKS token: ${tokenError.message}`, data: data });
+                  }
+                } else {
+                  console.error('Request failed with 401, but no EKS info found to refresh token.');
+                  reject({ statusCode: response.statusCode, error: `Request failed with status ${response.statusCode}`, data: data });
+                }
+              } else {
+                console.error(`Error fetching ${apiPath}: Status code ${response.statusCode}`);
+                reject({ statusCode: response.statusCode, error: `Request failed with status ${response.statusCode}`, data: data });
+              }
+            } catch (parseError) {
+               console.error(`Error parsing K8s response for ${apiPath}:`, parseError);
+               reject({ statusCode: 500, error: 'Failed to parse K8s response', data: data });
+            }
+          });
+        });
+
+        request.on('error', (error) => {
+          console.error(`Error during K8s request to ${apiPath}:`, error);
+          reject({ statusCode: 500, error: `Request failed: ${error.message}` });
+        });
+
+        request.end();
+
+      } catch (initialError) {
+        console.error(`Failed to initiate K8s request to ${apiPath}:`, initialError);
+        // If token extraction itself failed before the request
+         if (attempts === 1) { // Only reject on first attempt if token extraction fails
+            reject({ statusCode: 500, error: `Failed to prepare request: ${initialError.message}` });
+         } else {
+           // If error happened during retry setup (less likely here)
+           reject({ statusCode: 500, error: `Failed during retry setup: ${initialError.message}` });
+         }
+      }
+    };
+
+    // Start the first attempt
+    try {
+        const initialToken = extractK8sAuthToken(kubeconfig);
+        await tryRequest(initialToken);
+    } catch (tokenExtractionError) {
+        console.error('Initial token extraction failed:', tokenExtractionError);
+        reject({ statusCode: 500, error: `Failed to get initial token: ${tokenExtractionError.message}` });
+    }
+  });
+}
+
 // New endpoint to get namespaces
 app.post('/api/k8s/namespaces', async (req, res) => {
   try {
     const { kubeconfig } = req.body;
-    
+
     if (!kubeconfig) {
       return res.status(400).json({ error: 'Missing kubeconfig' });
     }
-    
+
     // For mock data mode
     if (process.env.VITE_USE_MOCK_K8S_DATA === 'true') {
       console.log('Using mock data for namespaces endpoint');
-      return res.json({ 
+      return res.json({
         items: [
           { metadata: { name: 'default' } },
           { metadata: { name: 'kube-system' } },
@@ -878,58 +983,16 @@ app.post('/api/k8s/namespaces', async (req, res) => {
         ]
       });
     }
-    
-    const token = extractK8sAuthToken(kubeconfig);
-    const clusterEndpoint = getClusterEndpoint(kubeconfig);
-    const caCert = extractCaCert(kubeconfig);
-    
-    // Create request URL for namespaces
-    const apiEndpoint = `${clusterEndpoint}/api/v1/namespaces`;
-    
-    // Make request to K8s API
-    const request = https.request(apiEndpoint, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json'
-      },
-      ...(caCert && {
-        ca: Buffer.from(caCert, 'base64').toString('ascii'),
-        rejectUnauthorized: true
-      })
-    }, (response) => {
-      let data = '';
-      
-      response.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      response.on('end', () => {
-        try {
-          if (response.statusCode === 200) {
-            const namespaces = JSON.parse(data);
-            res.json(namespaces);
-          } else {
-            console.error(`Error fetching namespaces: Status code ${response.statusCode}`);
-            res.status(response.statusCode).json({ error: `Failed to fetch namespaces: ${data}` });
-          }
-        } catch (error) {
-          console.error('Error parsing namespace data:', error);
-          res.status(500).json({ error: 'Failed to parse namespace data' });
-        }
-      });
-    });
-    
-    request.on('error', (error) => {
-      console.error('Error fetching namespaces:', error);
-      res.status(500).json({ error: `Failed to fetch namespaces: ${error.message}` });
-    });
-    
-    request.end();
-    
+
+    // Use the new helper function
+    const apiPath = '/api/v1/namespaces';
+    const namespacesData = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+    res.json(namespacesData);
+
   } catch (error) {
     console.error('Error in namespaces endpoint:', error);
-    res.status(500).json({ error: `Internal server error: ${error.message}` });
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: `Failed to fetch namespaces: ${error.error || error.message}` });
   }
 });
 
@@ -937,83 +1000,41 @@ app.post('/api/k8s/namespaces', async (req, res) => {
 app.post('/api/k8s/services', async (req, res) => {
   try {
     const { kubeconfig, namespace = '' } = req.body;
-    
+
     if (!kubeconfig) {
       return res.status(400).json({ error: 'Missing kubeconfig' });
     }
-    
+
     // For mock data mode
     if (process.env.VITE_USE_MOCK_K8S_DATA === 'true') {
       console.log('Using mock data for services endpoint');
-      return res.json({ 
+      return res.json({
         items: [
-          { 
-            metadata: { 
+          {
+            metadata: {
               name: 'kubernetes',
-              namespace: 'default' 
+              namespace: 'default'
             },
             spec: {
               type: 'ClusterIP',
               ports: [{ port: 443, protocol: 'TCP' }]
-            } 
+            }
           }
         ]
       });
     }
-    
-    const token = extractK8sAuthToken(kubeconfig);
-    const clusterEndpoint = getClusterEndpoint(kubeconfig);
-    const caCert = extractCaCert(kubeconfig);
-    
-    // Create request URL for services (optionally filtered by namespace)
-    const apiEndpoint = namespace 
-      ? `${clusterEndpoint}/api/v1/namespaces/${namespace}/services`
-      : `${clusterEndpoint}/api/v1/services`;
-    
-    // Make request to K8s API
-    const request = https.request(apiEndpoint, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json'
-      },
-      ...(caCert && {
-        ca: Buffer.from(caCert, 'base64').toString('ascii'),
-        rejectUnauthorized: true
-      })
-    }, (response) => {
-      let data = '';
-      
-      response.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      response.on('end', () => {
-        try {
-          if (response.statusCode === 200) {
-            const services = JSON.parse(data);
-            res.json(services);
-          } else {
-            console.error(`Error fetching services: Status code ${response.statusCode}`);
-            res.status(response.statusCode).json({ error: `Failed to fetch services: ${data}` });
-          }
-        } catch (error) {
-          console.error('Error parsing service data:', error);
-          res.status(500).json({ error: 'Failed to parse service data' });
-        }
-      });
-    });
-    
-    request.on('error', (error) => {
-      console.error('Error fetching services:', error);
-      res.status(500).json({ error: `Failed to fetch services: ${error.message}` });
-    });
-    
-    request.end();
-    
+
+    // Use the new helper function
+    const apiPath = namespace
+      ? `/api/v1/namespaces/${namespace}/services`
+      : '/api/v1/services';
+    const servicesData = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+    res.json(servicesData);
+
   } catch (error) {
     console.error('Error in services endpoint:', error);
-    res.status(500).json({ error: `Internal server error: ${error.message}` });
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: `Failed to fetch services: ${error.error || error.message}` });
   }
 });
 
