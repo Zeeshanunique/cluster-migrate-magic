@@ -147,6 +147,61 @@ const ClusterDetails = () => {
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoadingMonitoring, setIsLoadingMonitoring] = useState(false);
 
+  // Function to fetch namespaces
+  const fetchNamespaces = async (kubeconfig: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingNamespaces(true);
+    console.log("Attempting to fetch namespaces with POST request...");
+    
+    try {
+      // Explicitly log the API endpoint we're calling
+      console.log("Calling API endpoint:", KUBERNETES_API.GET_NAMESPACES);
+      
+      const namespacesData = await apiRequest(
+        KUBERNETES_API.GET_NAMESPACES,
+        'POST',
+        { kubeconfig }
+      );
+      
+      // Log the response to help with debugging
+      console.log("Namespaces API response:", namespacesData);
+      
+      if (namespacesData && namespacesData.items) {
+        // Map to a consistent format
+        const namespacesList = namespacesData.items.map((ns: any) => ({
+          name: ns.metadata.name,
+          status: ns.status?.phase || 'Active',
+          creationTimestamp: ns.metadata.creationTimestamp,
+          labels: ns.metadata.labels || {},
+          annotations: ns.metadata.annotations || {}
+        }));
+        
+        console.log("Processed namespaces:", namespacesList);
+        setNamespaces(namespacesList);
+        
+        // Set default namespace and fetch resources for it
+        if (namespacesList.length > 0) {
+          const defaultNs = namespacesList.find((ns: any) => ns.name === 'default') || namespacesList[0];
+          setSelectedNamespace(defaultNs.name);
+          fetchResourcesForNamespace(kubeconfig, defaultNs.name);
+        } else {
+          console.warn("No namespaces returned from API");
+        }
+      } else {
+        console.error("API returned a response but no namespace items were found:", namespacesData);
+        setNamespaces([]);
+      }
+    } catch (error) {
+      console.error('Error fetching namespaces:', error);
+      // Don't use mock data, but show the error in UI
+      toast.error('Failed to fetch namespaces: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setNamespaces([]);
+    } finally {
+      setIsLoadingNamespaces(false);
+    }
+  };
+
   useEffect(() => {
     const loadCluster = async () => {
       if (!user || !id) return;
@@ -735,130 +790,115 @@ const ClusterDetails = () => {
   
   // Function to fetch workloads (pods, deployments, replicasets, etc.)
   const fetchWorkloads = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig) return;
+    if (!kubeconfig || !namespace) return;
     
     setIsLoadingWorkloads(true);
     
+    // Fetch each workload type separately with individual error handling
+    
+    // Fetch pods
     try {
-      // Fetch pods
-      const podsData = await apiRequest(
-        KUBERNETES_API.GET_PODS,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      
-      if (podsData && podsData.items) {
-        const podsList = podsData.items.map((pod: any) => ({
-          name: pod.metadata.name,
-          namespace: pod.metadata.namespace,
-          status: pod.status?.phase || 'Unknown',
-          restarts: pod.status?.containerStatuses?.reduce((acc: number, cs: any) => acc + (cs.restartCount || 0), 0) || 0,
-          node: pod.spec?.nodeName || 'Unknown',
-          age: pod.metadata.creationTimestamp,
-          creationTimestamp: pod.metadata.creationTimestamp
-        }));
-        
-        setPods(podsList);
-      }
-      
-      // Fetch deployments
-      const deploymentsData = await apiRequest(
-        KUBERNETES_API.GET_DEPLOYMENTS,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      
-      if (deploymentsData && deploymentsData.items) {
-        const deploymentsList = deploymentsData.items.map((deployment: any) => ({
-          name: deployment.metadata.name,
-          namespace: deployment.metadata.namespace,
-          replicas: {
-            desired: deployment.spec.replicas,
-            current: deployment.status.replicas,
-            ready: deployment.status.readyReplicas || 0,
-            available: deployment.status.availableReplicas || 0
-          },
-          strategy: deployment.spec.strategy.type,
-          age: deployment.metadata.creationTimestamp,
-          creationTimestamp: deployment.metadata.creationTimestamp
-        }));
-        
-        setDeployments(deploymentsList);
-      }
-      
-      // Similar implementation for other workload types
-      // ReplicaSets, StatefulSets, DaemonSets, Jobs, CronJobs
-      
+      const podsData = await apiRequest(KUBERNETES_API.GET_PODS, 'POST', { kubeconfig, namespace });
+      if (podsData && podsData.items) setPods(podsData.items);
     } catch (error) {
-      console.error('Error fetching workloads:', error);
-      toast.error('Failed to fetch workload resources');
-    } finally {
-      setIsLoadingWorkloads(false);
+      console.error('Error fetching pods:', error);
+      // Continue with other workloads
     }
+    
+    // Fetch deployments
+    try {
+      const deploymentsData = await apiRequest(KUBERNETES_API.GET_DEPLOYMENTS, 'POST', { kubeconfig, namespace });
+      if (deploymentsData && deploymentsData.items) setDeployments(deploymentsData.items);
+    } catch (error) {
+      console.error('Error fetching deployments:', error);
+      // Continue with other workloads
+    }
+    
+    // Fetch replica sets
+    try {
+      const replicaSetsData = await apiRequest(KUBERNETES_API.GET_REPLICASETS, 'POST', { kubeconfig, namespace });
+      if (replicaSetsData && replicaSetsData.items) setReplicaSets(replicaSetsData.items);
+    } catch (error) {
+      console.error('Error fetching replica sets:', error);
+      // Continue with other workloads
+    }
+    
+    // Fetch stateful sets
+    try {
+      const statefulSetsData = await apiRequest(KUBERNETES_API.GET_STATEFULSETS, 'POST', { kubeconfig, namespace });
+      if (statefulSetsData && statefulSetsData.items) setStatefulSets(statefulSetsData.items);
+    } catch (error) {
+      console.error('Error fetching stateful sets:', error);
+      // Continue with other workloads
+    }
+    
+    // Fetch daemon sets
+    try {
+      const daemonSetsData = await apiRequest(KUBERNETES_API.GET_DAEMONSETS, 'POST', { kubeconfig, namespace });
+      if (daemonSetsData && daemonSetsData.items) setDaemonSets(daemonSetsData.items);
+    } catch (error) {
+      console.error('Error fetching daemon sets:', error);
+      // Continue with other workloads
+    }
+    
+    // Fetch jobs
+    try {
+      const jobsData = await apiRequest(KUBERNETES_API.GET_JOBS, 'POST', { kubeconfig, namespace });
+      if (jobsData && jobsData.items) setJobs(jobsData.items);
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+      // Continue with other workloads
+    }
+    
+    // Fetch cron jobs
+    try {
+      const cronJobsData = await apiRequest(KUBERNETES_API.GET_CRONJOBS, 'POST', { kubeconfig, namespace });
+      if (cronJobsData && cronJobsData.items) setCronJobs(cronJobsData.items);
+    } catch (error) {
+      console.error('Error fetching cron jobs:', error);
+      // Continue with other workloads
+    }
+    
+    setIsLoadingWorkloads(false);
   };
 
   // Function to fetch networking resources (services, ingresses)
   const fetchNetworking = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig) return;
+    if (!kubeconfig || !namespace) return;
     
     setIsLoadingNetworking(true);
-    setIsLoadingServices(true);
     
+    // Fetch services
     try {
-      // Fetch services
       const servicesData = await apiRequest(
         KUBERNETES_API.GET_SERVICES,
         'POST',
         { kubeconfig, namespace }
       );
-      
       if (servicesData && servicesData.items) {
-        const servicesList = servicesData.items.map((service: any) => ({
-          name: service.metadata.name,
-          namespace: service.metadata.namespace,
-          type: service.spec.type,
-          clusterIP: service.spec.clusterIP,
-          externalIP: service.spec.externalIPs?.[0] || service.status?.loadBalancer?.ingress?.[0]?.ip || null,
-          ports: service.spec.ports.map((port: any) => ({
-            port: port.port,
-            targetPort: port.targetPort,
-            nodePort: port.nodePort,
-            protocol: port.protocol
-          })),
-          creationTimestamp: service.metadata.creationTimestamp
-        }));
-        
-        setServices(servicesList);
+        setServices(servicesData.items);
       }
-      
-      // Fetch ingresses
+    } catch (error) {
+      console.error('Error fetching services:', error);
+      // Continue with other resources
+    }
+
+    // Fetch ingresses
+    try {
       const ingressesData = await apiRequest(
         KUBERNETES_API.GET_INGRESSES,
         'POST',
         { kubeconfig, namespace }
       );
-      
       if (ingressesData && ingressesData.items) {
-        const ingressesList = ingressesData.items.map((ingress: any) => ({
-          name: ingress.metadata.name,
-          namespace: ingress.metadata.namespace,
-          hosts: ingress.spec.rules?.map((rule: any) => rule.host) || [],
-          ingressClassName: ingress.spec.ingressClassName,
-          tls: ingress.spec.tls && ingress.spec.tls.length > 0,
-          age: ingress.metadata.creationTimestamp,
-          creationTimestamp: ingress.metadata.creationTimestamp
-        }));
-        
-        setIngresses(ingressesList);
+        setIngresses(ingressesData.items);
       }
-      
     } catch (error) {
-      console.error('Error fetching networking resources:', error);
-      toast.error('Failed to fetch networking resources');
-    } finally {
-      setIsLoadingNetworking(false);
-      setIsLoadingServices(false);
+      console.error('Error fetching ingresses:', error);
+      // Continue with other resources
     }
+    
+    setIsLoadingNetworking(false);
   };
 
   // Function to fetch configuration resources (configmaps, secrets, etc.)
@@ -866,9 +906,14 @@ const ClusterDetails = () => {
     if (!kubeconfig) return;
     
     setIsLoadingConfigurations(true);
-    
+    // Clear previous state
+    setConfigMaps([]);
+    setSecrets([]);
+    setResourceQuotas([]);
+    setLimitRanges([]);
+
+    // Fetch configmaps
     try {
-      // Fetch ConfigMaps
       const configMapsData = await apiRequest(
         KUBERNETES_API.GET_CONFIGMAPS,
         'POST',
@@ -879,15 +924,19 @@ const ClusterDetails = () => {
         const configMapsList = configMapsData.items.map((cm: any) => ({
           name: cm.metadata.name,
           namespace: cm.metadata.namespace,
-          dataCount: cm.data ? Object.keys(cm.data).length : 0,
-          age: cm.metadata.creationTimestamp,
-          creationTimestamp: cm.metadata.creationTimestamp
+          data: cm.data,
+          dataCount: cm.data ? Object.keys(cm.data).length : 0, 
+          age: formatDate(cm.metadata.creationTimestamp)
         }));
-        
         setConfigMaps(configMapsList);
       }
-      
-      // Fetch Secrets
+    } catch (error) {
+      console.error('Error fetching configmaps:', error);
+      // Continue with other configurations
+    }
+    
+    // Fetch secrets
+    try {
       const secretsData = await apiRequest(
         KUBERNETES_API.GET_SECRETS,
         'POST',
@@ -899,22 +948,72 @@ const ClusterDetails = () => {
           name: secret.metadata.name,
           namespace: secret.metadata.namespace,
           type: secret.type,
-          dataCount: secret.data ? Object.keys(secret.data).length : 0,
-          age: secret.metadata.creationTimestamp,
-          creationTimestamp: secret.metadata.creationTimestamp
+          dataCount: secret.data ? Object.keys(secret.data).length : 0, 
+          age: formatDate(secret.metadata.creationTimestamp)
         }));
-        
         setSecrets(secretsList);
       }
-      
-      // Implement similar logic for ResourceQuotas and LimitRanges
-      
     } catch (error) {
-      console.error('Error fetching configuration resources:', error);
-      toast.error('Failed to fetch configuration resources');
-    } finally {
-      setIsLoadingConfigurations(false);
+      console.error('Error fetching secrets:', error);
+      // Continue with other configurations
     }
+    
+    // Fetch resource quotas
+    try {
+      const resourceQuotasData = await apiRequest(
+        KUBERNETES_API.GET_RESOURCE_QUOTAS,
+        'POST',
+        { kubeconfig, namespace }
+      );
+      
+      if (resourceQuotasData && resourceQuotasData.items) {
+        const resourceQuotasList = resourceQuotasData.items.map((quota: any) => ({
+          name: quota.metadata.name,
+          namespace: quota.metadata.namespace,
+          resources: Object.entries(quota.status?.hard || {}).map(([resource, hardLimit]) => ({
+             resource,
+             used: quota.status?.used?.[resource] || '0',
+             hard: hardLimit
+           })),
+          age: formatDate(quota.metadata.creationTimestamp)
+        }));
+        setResourceQuotas(resourceQuotasList);
+      }
+    } catch (error) {
+      console.error('Error fetching resource quotas:', error);
+      // Continue with other configurations
+    }
+
+    // Fetch limit ranges
+    try {
+      const limitRangesData = await apiRequest(
+        KUBERNETES_API.GET_LIMIT_RANGES, 
+        'POST',
+        { kubeconfig, namespace }
+      );
+
+      if (limitRangesData && limitRangesData.items) {
+        const limitRangesList = limitRangesData.items.map((limit: any) => ({
+          name: limit.metadata.name,
+          namespace: limit.metadata.namespace,
+          limits: limit.spec?.limits?.map((item: any) => ({
+            type: item.type,
+            resource: Object.keys(item.min || item.max || item.default || item.defaultRequest || {})[0] || 'N/A',
+            min: item.min ? Object.values(item.min)[0] : '-',
+            max: item.max ? Object.values(item.max)[0] : '-',
+            default: item.default ? Object.values(item.default)[0] : '-',
+            defaultRequest: item.defaultRequest ? Object.values(item.defaultRequest)[0] : '-',
+          })) || [],
+          age: formatDate(limit.metadata.creationTimestamp)
+        }));
+        setLimitRanges(limitRangesList);
+      }
+    } catch (error) {
+      console.error('Error fetching limit ranges:', error);
+      // Continue with other configurations
+    }
+    
+    setIsLoadingConfigurations(false);
   };
 
   // Function to fetch storage resources (PVs, PVCs, StorageClasses)
@@ -922,75 +1021,85 @@ const ClusterDetails = () => {
     if (!kubeconfig) return;
     
     setIsLoadingStorage(true);
-    
+    // Clear previous state
+    setPersistentVolumes([]);
+    setPersistentVolumeClaims([]);
+    setStorageClasses([]);
+
     try {
-      // Fetch PVs (cluster-wide resource)
-      const pvsData = await apiRequest(
-        KUBERNETES_API.GET_PERSISTENT_VOLUMES,
-        'POST',
-        { kubeconfig }
-      );
-      
-      if (pvsData && pvsData.items) {
-        const pvsList = pvsData.items.map((pv: any) => ({
-          name: pv.metadata.name,
-          capacity: pv.spec.capacity.storage,
-          accessModes: pv.spec.accessModes,
-          reclaimPolicy: pv.spec.persistentVolumeReclaimPolicy,
-          status: pv.status.phase,
-          claim: pv.spec.claimRef ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : null,
-          storageClass: pv.spec.storageClassName,
-          age: pv.metadata.creationTimestamp,
-          creationTimestamp: pv.metadata.creationTimestamp
-        }));
+      // Fetch persistent volumes 
+      try {
+        const persistentVolumesData = await apiRequest(
+          KUBERNETES_API.GET_PERSISTENT_VOLUMES,
+          'POST',
+          { kubeconfig }
+        );
         
-        setPersistentVolumes(pvsList);
+        if (persistentVolumesData && persistentVolumesData.items) {
+          const pvList = persistentVolumesData.items.map((pv: any) => ({
+            name: pv.metadata.name,
+            capacity: pv.spec.capacity?.storage,
+            accessModes: pv.spec.accessModes,
+            reclaimPolicy: pv.spec.persistentVolumeReclaimPolicy,
+            status: pv.status.phase,
+            claim: pv.spec.claimRef ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : '-',
+            storageClass: pv.spec.storageClassName || '-',
+            age: formatDate(pv.metadata.creationTimestamp)
+          }));
+          setPersistentVolumes(pvList);
+        }
+      } catch (pvError) {
+        console.error('Error fetching persistent volumes:', pvError);
       }
       
-      // Fetch PVCs (namespace-scoped)
-      const pvcsData = await apiRequest(
-        KUBERNETES_API.GET_PERSISTENT_VOLUME_CLAIMS,
-        'POST',
-        { kubeconfig, namespace: selectedNamespace }
-      );
-      
-      if (pvcsData && pvcsData.items) {
-        const pvcsList = pvcsData.items.map((pvc: any) => ({
-          name: pvc.metadata.name,
-          namespace: pvc.metadata.namespace,
-          status: pvc.status.phase,
-          volumeName: pvc.spec.volumeName,
-          capacity: pvc.status.capacity?.storage,
-          accessModes: pvc.spec.accessModes,
-          storageClass: pvc.spec.storageClassName,
-          age: pvc.metadata.creationTimestamp,
-          creationTimestamp: pvc.metadata.creationTimestamp
-        }));
+      // Fetch persistent volume claims
+      try {
+        const persistentVolumeClaimsData = await apiRequest(
+          KUBERNETES_API.GET_PERSISTENT_VOLUME_CLAIMS,
+          'POST',
+          { kubeconfig } 
+        );
         
-        setPersistentVolumeClaims(pvcsList);
+        if (persistentVolumeClaimsData && persistentVolumeClaimsData.items) {
+          const pvcList = persistentVolumeClaimsData.items.map((pvc: any) => ({
+            name: pvc.metadata.name,
+            namespace: pvc.metadata.namespace,
+            status: pvc.status.phase,
+            volumeName: pvc.spec.volumeName || '-',
+            capacity: pvc.status.capacity?.storage,
+            accessModes: pvc.spec.accessModes,
+            storageClass: pvc.spec.storageClassName || '-',
+            age: formatDate(pvc.metadata.creationTimestamp)
+          }));
+          setPersistentVolumeClaims(pvcList);
+        }
+      } catch (pvcError) {
+        console.error('Error fetching persistent volume claims:', pvcError);
       }
       
-      // Fetch StorageClasses (cluster-wide resource)
-      const scData = await apiRequest(
-        KUBERNETES_API.GET_STORAGE_CLASSES,
-        'POST',
-        { kubeconfig }
-      );
-      
-      if (scData && scData.items) {
-        const scList = scData.items.map((sc: any) => ({
-          name: sc.metadata.name,
-          provisioner: sc.provisioner,
-          reclaimPolicy: sc.reclaimPolicy,
-          volumeBindingMode: sc.volumeBindingMode,
-          allowVolumeExpansion: sc.allowVolumeExpansion,
-          age: sc.metadata.creationTimestamp,
-          creationTimestamp: sc.metadata.creationTimestamp
-        }));
+      // Fetch storage classes
+      try {
+        const storageClassesData = await apiRequest(
+          KUBERNETES_API.GET_STORAGE_CLASSES,
+          'POST',
+          { kubeconfig }
+        );
         
-        setStorageClasses(scList);
+        if (storageClassesData && storageClassesData.items) {
+          const scList = storageClassesData.items.map((sc: any) => ({
+            name: sc.metadata.name,
+            provisioner: sc.provisioner,
+            reclaimPolicy: sc.reclaimPolicy || 'Delete',
+            volumeBindingMode: sc.volumeBindingMode || 'Immediate',
+            allowVolumeExpansion: sc.allowVolumeExpansion || false,
+            isDefault: sc.metadata.annotations?.['storageclass.kubernetes.io/is-default-class'] === 'true',
+            age: formatDate(sc.metadata.creationTimestamp)
+          }));
+          setStorageClasses(scList);
+        }
+      } catch (scError) {
+        console.error('Error fetching storage classes:', scError);
       }
-      
     } catch (error) {
       console.error('Error fetching storage resources:', error);
       toast.error('Failed to fetch storage resources');
@@ -999,163 +1108,158 @@ const ClusterDetails = () => {
     }
   };
   
-  // Function to fetch monitoring data
-  const fetchMonitoring = async (kubeconfig: string) => {
-    if (!kubeconfig) return;
-    
-    setIsLoadingMonitoring(true);
-    
-    try {
-      // Fetch metrics
-      const metricsData = await apiRequest(
-        KUBERNETES_API.GET_METRICS,
-        'POST',
-        { kubeconfig }
-      );
-      
-      if (metricsData) {
-        setMetrics(metricsData);
-      }
-      
-      // Fetch logs
-      const logsData = await apiRequest(
-        KUBERNETES_API.GET_LOGS,
-        'POST',
-        { kubeconfig }
-      );
-      
-      if (logsData) {
-        setLogs(logsData);
-      }
-      
-    } catch (error) {
-      console.error('Error fetching monitoring data:', error);
-      toast.error('Failed to fetch monitoring data');
-    } finally {
-      setIsLoadingMonitoring(false);
-    }
-  };
-  
   // Function to fetch all resources for a namespace
   const fetchResourcesForNamespace = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig) return;
+    if (!kubeconfig || !namespace) {
+      console.error("Cannot fetch resources: missing kubeconfig or namespace");
+      return;
+    }
     
-    // Fetch workloads, networking, configurations, storage, and monitoring for the selected namespace
+    console.log(`Fetching all resources for namespace: ${namespace}`);
+    
+    // Fetch all resource types for this namespace, handling each separately
+    
+    // Fetch workloads (pods, deployments, etc.)
     try {
       await fetchWorkloads(kubeconfig, namespace);
-      await fetchNetworking(kubeconfig, namespace);
-      await fetchConfigurations(kubeconfig, namespace);
-      await fetchStorage(kubeconfig);
-      await fetchMonitoring(kubeconfig);
     } catch (error) {
-      console.error('Error fetching resources for namespace:', error);
-      toast.error('Failed to fetch resources for namespace');
+      console.error(`Error fetching workloads for namespace ${namespace}:`, error);
+      // Continue with other resources
     }
+    
+    // Fetch networking resources (services, ingresses)
+    try {
+      await fetchNetworking(kubeconfig, namespace);
+    } catch (error) {
+      console.error(`Error fetching networking resources for namespace ${namespace}:`, error);
+      // Continue with other resources
+    }
+    
+    // Fetch configuration resources (configmaps, secrets, etc.)
+    try {
+      await fetchConfigurations(kubeconfig, namespace);
+    } catch (error) {
+      console.error(`Error fetching configuration resources for namespace ${namespace}:`, error);
+      // Continue with other resources
+    }
+    
+    // Storage resources might be cluster-wide, but some like PVCs are namespace-scoped
+    try {
+      await fetchStorage(kubeconfig);
+    } catch (error) {
+      console.error(`Error fetching storage resources:`, error);
+      // Continue with other resources
+    }
+    
+    // Fetch specific services for this namespace
+    try {
+      await fetchServices(kubeconfig, namespace);
+    } catch (error) {
+      console.error(`Error fetching services for namespace ${namespace}:`, error);
+      // Continue with other resources
+    }
+    
+    console.log(`Completed resource fetching for namespace: ${namespace}`);
   };
   
-  // Function to fetch namespaces
-  const fetchNamespaces = async (kubeconfig: string) => {
-    if (!kubeconfig) return;
-    
-    setIsLoadingNamespaces(true);
-    setLiveStatusError(null);
-    
-    try {
-      const data = await apiRequest(
-        KUBERNETES_API.GET_NAMESPACES,
-        'POST',
-        { kubeconfig }
-      );
-      
-      if (data && data.items) {
-        const namespacesList = data.items.map((ns: any) => ({
-          name: ns.metadata.name,
-          status: ns.status?.phase || 'Active',
-          creationTimestamp: ns.metadata.creationTimestamp
-        }));
-        
-        setNamespaces(namespacesList);
-        
-        // Set default namespace and fetch resources for it
-        if (namespacesList.length > 0) {
-          const defaultNs = namespacesList.find((ns: any) => ns.name === 'default') || namespacesList[0];
-          setSelectedNamespace(defaultNs.name);
-          fetchResourcesForNamespace(kubeconfig, defaultNs.name);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching namespaces:', error);
-      setLiveStatusError('Network error fetching namespaces');
-      setConsecutiveFailures(prev => prev + 1);
-      toast.error('Failed to fetch namespaces');
-    } finally {
-      setIsLoadingNamespaces(false);
-    }
-  };
-
   // Function to fetch nodes
   const fetchNodes = async (kubeconfig: string) => {
     if (!kubeconfig) return;
     
     setIsLoadingNodes(true);
-    setLiveStatusError(null);
+    console.log("Attempting to fetch nodes with POST request...");
     
     try {
-      const data = await apiRequest(
+      console.log("Calling nodes API endpoint:", KUBERNETES_API.GET_NODES);
+      
+      const nodesData = await apiRequest(
         KUBERNETES_API.GET_NODES,
         'POST',
         { kubeconfig }
       );
       
-      if (data && data.items) {
-        const nodesList = data.items.map((node: any) => ({
+      console.log("Nodes API response:", nodesData);
+
+      if (nodesData && nodesData.items) {
+        const nodesList = nodesData.items.map((node: any) => ({
           name: node.metadata.name,
           status: node.status?.conditions?.find((c: any) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady',
           creationTimestamp: node.metadata.creationTimestamp,
           kubeletVersion: node.status?.nodeInfo?.kubeletVersion,
           osImage: node.status?.nodeInfo?.osImage,
-          addresses: node.status?.addresses
+          addresses: node.status?.addresses,
+          roles: node.metadata.labels ? 
+            Object.keys(node.metadata.labels)
+              .filter(key => key.startsWith('node-role.kubernetes.io/'))
+              .map(key => key.replace('node-role.kubernetes.io/', ''))
+            : []
         }));
         
+        console.log("Processed nodes data:", nodesList);
         setNodes(nodesList);
+      } else {
+        console.error("API returned a response but no node items were found:", nodesData);
+        setNodes([]);
       }
     } catch (error) {
       console.error('Error fetching nodes:', error);
-      setLiveStatusError('Network error fetching nodes');
-      setConsecutiveFailures(prev => prev + 1);
-      toast.error('Failed to fetch nodes');
+      toast.error('Failed to fetch nodes: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setNodes([]);
     } finally {
       setIsLoadingNodes(false);
     }
   };
 
-  // Function to fetch services
+  // Fetch services for a specific namespace
   const fetchServices = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig) return;
+    if (!kubeconfig || !namespace) return;
     
     setIsLoadingServices(true);
     
     try {
-      const data = await apiRequest(
+      console.log(`Fetching services for namespace ${namespace}`);
+      const servicesData = await apiRequest(
         KUBERNETES_API.GET_SERVICES,
-        'POST',
+        'POST', // Revert to POST
         { kubeconfig, namespace }
       );
       
-      if (data && data.items) {
-        const servicesList = data.items.map((service: any) => ({
-          name: service.metadata.name,
-          type: service.spec.type,
-          clusterIP: service.spec.clusterIP,
-          ports: service.spec.ports,
-          creationTimestamp: service.metadata.creationTimestamp
-        }));
+      console.log('Services data received:', servicesData);
+      
+      if (servicesData && servicesData.items) {
+        // Transform the raw service data to ensure consistent structure
+        const transformedServices = servicesData.items.map((service: any) => {
+          // Extract service ports from spec.ports if available
+          const ports = service.spec?.ports ? 
+            service.spec.ports.map((port: any) => ({
+              port: port.port || 0,
+              protocol: port.protocol || 'TCP',
+              nodePort: port.nodePort || null,
+            })) : [];
+          
+          return {
+            name: service.metadata?.name || 'Unknown',
+            namespace: service.metadata?.namespace || namespace,
+            type: service.spec?.type || 'ClusterIP',
+            clusterIP: service.spec?.clusterIP || 'None',
+            externalIP: service.status?.loadBalancer?.ingress?.[0]?.ip || 
+                       service.status?.loadBalancer?.ingress?.[0]?.hostname || null,
+            ports: ports,
+            age: service.metadata?.creationTimestamp ?
+              formatDate(service.metadata.creationTimestamp) : 'Unknown'
+          };
+        });
         
-        setServices(servicesList);
+        console.log('Transformed services:', transformedServices);
+        setServices(transformedServices);
+      } else {
+        console.warn('No services found or empty response received');
+        setServices([]);
       }
     } catch (error) {
-      console.error('Error fetching services:', error);
-      toast.error('Failed to fetch services');
+      console.error('Error fetching services for namespace ', namespace, ':', error);
+      toast.error('Failed to fetch services for namespace: ' + namespace);
+      setServices([]);
     } finally {
       setIsLoadingServices(false);
     }
@@ -1163,9 +1267,14 @@ const ClusterDetails = () => {
   
   // Handle namespace change
   const handleNamespaceChange = (namespace: string) => {
+    console.log(`Changing namespace to: ${namespace}`);
     setSelectedNamespace(namespace);
-    if (cluster && cluster.kubeconfig) {
-      fetchServices(cluster.kubeconfig, namespace);
+    
+    if (namespace && cluster?.kubeconfig) {
+      // Fetch resources for this namespace
+      fetchResourcesForNamespace(cluster.kubeconfig, namespace);
+    } else {
+      console.warn(`Cannot fetch resources: ${namespace ? 'No kubeconfig available' : 'No namespace selected'}`);
     }
   };
 
@@ -1244,6 +1353,68 @@ const ClusterDetails = () => {
 
   const handleMigrateToMultiTenant = () => {
     navigate(`/migration?cluster=${cluster?.id}`);
+  };
+
+  // Function to fetch monitoring data (metrics, logs)
+  const fetchMonitoring = async (kubeconfig: string) => {
+    if (!kubeconfig) return;
+
+    setIsLoadingMonitoring(true);
+    // Clear previous state
+    setMetrics(null); 
+    setLogs([]); 
+
+    try {
+      // Fetch metrics
+      try {
+        const metricsData = await apiRequest(
+          KUBERNETES_API.GET_METRICS, 
+          'POST',
+          { kubeconfig } 
+        );
+        if (metricsData) {
+          const transformedMetrics = {
+            cpu: { 
+              used: metricsData.cpuUsage?.used || 0, 
+              total: metricsData.cpuUsage?.total || 0, 
+              percentUsed: metricsData.cpuUsage?.percent || 0 
+            },
+            memory: { 
+              used: metricsData.memoryUsage?.used || '0Gi', 
+              total: metricsData.memoryUsage?.total || '0Gi', 
+              percentUsed: metricsData.memoryUsage?.percent || 0 
+            },
+            pods: { 
+              used: metricsData.podUsage?.used || 0, 
+              total: metricsData.podUsage?.total || 0, 
+              percentUsed: metricsData.podUsage?.percent || 0 
+            }
+          };
+          setMetrics(transformedMetrics);
+        }
+      } catch (error) {
+        console.error('Error fetching metrics:', error);
+      }
+
+      // Fetch logs
+      try {
+        const logsData = await apiRequest(
+          KUBERNETES_API.GET_LOGS, 
+          'POST',
+          { kubeconfig } 
+        );
+        if (logsData && logsData.items) {
+          setLogs(logsData.items); 
+        }
+      } catch (error) {
+        console.error('Error fetching logs:', error);
+      }
+    } catch (error) {
+      console.error('Error in fetchMonitoring:', error);
+      toast.error('Failed to fetch monitoring data');
+    } finally {
+      setIsLoadingMonitoring(false);
+    }
   };
 
   return (
@@ -1931,11 +2102,11 @@ const ClusterDetails = () => {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.clusterIP}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.externalIP || '-'}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {svc.ports.map((port: any) => (
+                                              {svc.ports && svc.ports.map ? svc.ports.map((port: any) => (
                                                 <div key={`${port.port}-${port.protocol}`}>
                                                   {port.port}:{port.nodePort || port.port}/{port.protocol}
                                                 </div>
-                                              ))}
+                                              )) : '-'}
                                             </td>
                                           </tr>
                                         ))}
@@ -2611,12 +2782,12 @@ const ClusterDetails = () => {
                               <div key={index} className="border rounded-md p-4 bg-gray-50">
                                 <h4 className="font-medium mb-2">{user.name}</h4>
                                 <div className="space-y-1">
-                                  <p className="text-sm">
+                                  <div className="text-sm">
                                     <span className="font-medium">Auth Type:</span> 
                                     <Badge className="ml-1">
                                       {user.authType.charAt(0).toUpperCase() + user.authType.slice(1)}
                                     </Badge>
-                                  </p>
+                                  </div>
                                   {user.execCommand && (
                                     <div>
                                       <p className="text-sm font-medium">Command:</p>

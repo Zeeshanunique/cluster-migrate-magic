@@ -1107,6 +1107,373 @@ app.get('/health', (req, res) => {
 // For development only - in production, you would use proper certificate validation
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+// Helper function to create empty response templates for Kubernetes resources
+function createEmptyK8sResourceList(kind) {
+  return {
+    kind: `${kind}List`,
+    apiVersion: 'v1',
+    metadata: {
+      resourceVersion: '',
+    },
+    items: []
+  };
+}
+
+// Add missing Kubernetes API endpoints
+// Deployments endpoint
+app.post('/api/k8s/deployments', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/deployments request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty deployments response
+    const emptyDeployments = createEmptyK8sResourceList('Deployment');
+    
+    // Return empty list for now
+    res.json(emptyDeployments);
+  } catch (error) {
+    console.error('Error handling deployments request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// ReplicaSets endpoint
+app.post('/api/k8s/replicasets', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/replicasets request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty replicasets response
+    const emptyReplicaSets = createEmptyK8sResourceList('ReplicaSet');
+    
+    // Return empty list for now
+    res.json(emptyReplicaSets);
+  } catch (error) {
+    console.error('Error handling replicasets request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// StatefulSets endpoint
+app.post('/api/k8s/statefulsets', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/statefulsets request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty statefulsets response
+    const emptyStatefulSets = createEmptyK8sResourceList('StatefulSet');
+    
+    // Return empty list for now
+    res.json(emptyStatefulSets);
+  } catch (error) {
+    console.error('Error handling statefulsets request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// DaemonSets endpoint
+app.post('/api/k8s/daemonsets', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/daemonsets request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty daemonsets response
+    const emptyDaemonSets = createEmptyK8sResourceList('DaemonSet');
+    
+    // Return empty list for now
+    res.json(emptyDaemonSets);
+  } catch (error) {
+    console.error('Error handling daemonsets request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Jobs endpoint
+app.post('/api/k8s/jobs', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/jobs request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty jobs response
+    const emptyJobs = createEmptyK8sResourceList('Job');
+    
+    // Return empty list for now
+    res.json(emptyJobs);
+  } catch (error) {
+    console.error('Error handling jobs request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// CronJobs endpoint
+app.post('/api/k8s/cronjobs', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/cronjobs request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty cronjobs response
+    const emptyCronJobs = createEmptyK8sResourceList('CronJob');
+    
+    // Return empty list for now
+    res.json(emptyCronJobs);
+  } catch (error) {
+    console.error('Error handling cronjobs request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Ingresses endpoint
+app.post('/api/k8s/ingresses', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/ingresses request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty ingresses response
+    const emptyIngresses = createEmptyK8sResourceList('Ingress');
+    
+    // Return empty list for now
+    res.json(emptyIngresses);
+  } catch (error) {
+    console.error('Error handling ingresses request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// ConfigMaps endpoint
+app.post('/api/k8s/configmaps', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/configmaps request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty configmaps response
+    const emptyConfigMaps = createEmptyK8sResourceList('ConfigMap');
+    
+    // Return empty list for now
+    res.json(emptyConfigMaps);
+  } catch (error) {
+    console.error('Error handling configmaps request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Secrets endpoint
+app.post('/api/k8s/secrets', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/secrets request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty secrets response
+    const emptySecrets = createEmptyK8sResourceList('Secret');
+    
+    // Return empty list for now
+    res.json(emptySecrets);
+  } catch (error) {
+    console.error('Error handling secrets request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// ResourceQuotas endpoint
+app.post('/api/k8s/resourcequotas', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/resourcequotas request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty resourcequotas response
+    const emptyResourceQuotas = createEmptyK8sResourceList('ResourceQuota');
+    
+    // Return empty list for now
+    res.json(emptyResourceQuotas);
+  } catch (error) {
+    console.error('Error handling resourcequotas request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// LimitRanges endpoint
+app.post('/api/k8s/limitranges', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/limitranges request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty limitranges response
+    const emptyLimitRanges = createEmptyK8sResourceList('LimitRange');
+    
+    // Return empty list for now
+    res.json(emptyLimitRanges);
+  } catch (error) {
+    console.error('Error handling limitranges request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// PersistentVolumes endpoint
+app.post('/api/k8s/persistentvolumes', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/persistentvolumes request');
+    const { kubeconfig } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty persistent volumes response
+    const emptyPVs = createEmptyK8sResourceList('PersistentVolume');
+    
+    // Return empty list for now
+    res.json(emptyPVs);
+  } catch (error) {
+    console.error('Error handling persistentvolumes request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// PersistentVolumeClaims endpoint
+app.post('/api/k8s/persistentvolumeclaims', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/persistentvolumeclaims request');
+    const { kubeconfig, namespace } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty persistent volume claims response
+    const emptyPVCs = createEmptyK8sResourceList('PersistentVolumeClaim');
+    
+    // Return empty list for now
+    res.json(emptyPVCs);
+  } catch (error) {
+    console.error('Error handling persistentvolumeclaims request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// StorageClasses endpoint
+app.post('/api/k8s/storageclasses', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/storageclasses request');
+    const { kubeconfig } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty storage classes response
+    const emptySCs = createEmptyK8sResourceList('StorageClass');
+    
+    // Return empty list for now
+    res.json(emptySCs);
+  } catch (error) {
+    console.error('Error handling storageclasses request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Metrics endpoint
+app.post('/api/k8s/metrics', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/metrics request');
+    const { kubeconfig } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create sample metrics response
+    const sampleMetrics = {
+      cpuUsage: {
+        used: '500m',
+        total: '8000m',
+        percent: 6.25
+      },
+      memoryUsage: {
+        used: '2.5Gi',
+        total: '32Gi',
+        percent: 7.8
+      },
+      podUsage: {
+        used: 12,
+        total: 110,
+        percent: 10.9
+      }
+    };
+    
+    // Return sample metrics
+    res.json(sampleMetrics);
+  } catch (error) {
+    console.error('Error handling metrics request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Logs endpoint
+app.post('/api/k8s/logs', async (req, res) => {
+  try {
+    console.log('Handling /api/k8s/logs request');
+    const { kubeconfig, podName, namespace, container, tail } = req.body;
+    
+    if (!kubeconfig) {
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
+    }
+
+    // Create empty logs response
+    const emptyLogs = {
+      items: []
+    };
+    
+    // Return empty list for now
+    res.json(emptyLogs);
+  } catch (error) {
+    console.error('Error handling logs request:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Start server
 app.listen(port, () => {
   console.log(`Kubernetes proxy server running on port ${port}`);
