@@ -49,6 +49,11 @@ export const KUBERNETES_API = {
   MIGRATE_RESOURCES: `${API_BASE_URL}/api/k8s/migrate`,
   MIGRATION_STATUS: `${API_BASE_URL}/api/k8s/migration`,
   
+  // Real migration endpoints
+  MIGRATION_START: `${API_BASE_URL}/api/migrations/start`,
+  MIGRATION_STATUS_CHECK: (id: string) => `${API_BASE_URL}/api/migrations/${id}/status`,
+  MIGRATION_CANCEL: (id: string) => `${API_BASE_URL}/api/migrations/${id}/cancel`,
+  
   // Multi-tenant specific endpoints
   TENANT_NAMESPACES: `${API_BASE_URL}/api/k8s/tenant/namespaces`,
   TENANT_PODS: `${API_BASE_URL}/api/k8s/tenant/pods`,

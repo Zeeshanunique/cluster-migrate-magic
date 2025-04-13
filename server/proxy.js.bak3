@@ -1967,21 +1967,9 @@ async function processMigration(migrationId, sourceKubeconfig, targetKubeconfig,
     
     console.log(`Migration ${migrationId}: All resources processed successfully`);
     
-    // Update status - IMPORTANT: This must match what the client expects
+    // Update status
     migrationStatus.status = 'completed';
     migrationStatus.currentStep = 'Migration completed';
-    migrationStatus.resourcesMigrated = migrationStatus.resourcesTotal; // Ensure we show all resources as migrated
-    
-    // Log the final job state for debugging
-    console.log(`Migration ${migrationId} final status:`, JSON.stringify({
-      id: migrationStatus.id,
-      status: migrationStatus.status,
-      currentStep: migrationStatus.currentStep,
-      resourcesMigrated: migrationStatus.resourcesMigrated,
-      resourcesTotal: migrationStatus.resourcesTotal
-    }));
-    
-    // Update the job in the activeJobs map
     activeJobs.set(migrationId, migrationStatus);
   } catch (error) {
     console.error(`Migration ${migrationId} failed:`, error);
@@ -1997,14 +1985,6 @@ async function processMigration(migrationId, sourceKubeconfig, targetKubeconfig,
       }
       if (fs.existsSync(targetTempFile)) {
         fs.unlinkSync(targetTempFile);
-      }
-    } catch (cleanupError) {
-      console.warn(`Failed to clean up temp kubeconfig files:`, cleanupError);
-    }
-  }
-}
-
-// Function to verify resources in target cluster - NOTE: Not used in current implementation
 async function verifyResourcesInTargetCluster(kubeconfig, resources, migrationStatus) {
   for (const resource of migrationStatus.completedResources) {
     try {
@@ -2147,14 +2127,6 @@ app.get('/api/migrations/:id/status', (req, res) => {
   if (!job) {
     return res.status(404).json({ error: 'Migration not found' });
   }
-  
-  console.log(`Returning status for migration ${id}:`, JSON.stringify({
-    id: job.id,
-    status: job.status,
-    currentStep: job.currentStep,
-    resourcesMigrated: job.resourcesMigrated,
-    resourcesTotal: job.resourcesTotal
-  }));
   
   return res.json({
     id: job.id,

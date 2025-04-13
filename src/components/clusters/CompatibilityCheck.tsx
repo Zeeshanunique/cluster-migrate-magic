@@ -1,7 +1,9 @@
 import React from 'react';
-import { CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { CheckCircle, AlertCircle, XCircle, Server, Database, Box, Layers } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { EKSClusterConfig } from '@/utils/aws';
+import { EKSClusterConfig, EKSNodeInfo, EKSPodInfo, EKSPVInfo } from '@/utils/aws';
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface CompatibilityCheckProps {
   sourceConfig: EKSClusterConfig;
@@ -10,14 +12,31 @@ interface CompatibilityCheckProps {
     compatible: boolean;
     issues: string[];
   };
+  namespaces?: {name: string, status: string, age: string, labels: Record<string, string>, selected: boolean}[];
+  nodes?: EKSNodeInfo[];
+  pods?: EKSPodInfo[];
+  persistentVolumes?: EKSPVInfo[];
 }
 
 const CompatibilityCheck: React.FC<CompatibilityCheckProps> = ({
   sourceConfig,
   targetConfig,
-  compatibilityResult
+  compatibilityResult,
+  namespaces = [],
+  nodes = [],
+  pods = [],
+  persistentVolumes = []
 }) => {
   const { compatible, issues = [] } = compatibilityResult || { compatible: false, issues: [] };
+  
+  // Filter only selected resources
+  const selectedNamespaces = namespaces.filter(ns => ns.selected);
+  const selectedNodes = nodes.filter(node => node.selected);
+  const selectedPods = pods.filter(pod => pod.selected);
+  const selectedPVs = persistentVolumes.filter(pv => pv.selected);
+  
+  // Count total resources
+  const totalSelectedResources = selectedNamespaces.length + selectedNodes.length + selectedPods.length + selectedPVs.length;
 
   return (
     <div className="space-y-4">
@@ -41,6 +60,71 @@ const CompatibilityCheck: React.FC<CompatibilityCheckProps> = ({
         </div>
       </div>
       
+      {/* Display Selected Resources */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Selected Resources for Migration</CardTitle>
+          <CardDescription>You've selected {totalSelectedResources} resources to migrate</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {selectedNamespaces.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 flex items-center"><Layers className="h-4 w-4 mr-2"/> Namespaces ({selectedNamespaces.length})</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedNamespaces.map(ns => (
+                    <Badge key={ns.name} variant="outline" className="bg-blue-50 dark:bg-blue-950/30">
+                      {ns.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {selectedNodes.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 flex items-center"><Server className="h-4 w-4 mr-2"/> Nodes ({selectedNodes.length})</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedNodes.map(node => (
+                    <Badge key={node.name} variant="outline" className="bg-violet-50 dark:bg-violet-950/30">
+                      {node.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {selectedPods.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 flex items-center"><Box className="h-4 w-4 mr-2"/> Pods ({selectedPods.length})</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPods.map(pod => (
+                    <Badge key={pod.name} variant="outline" className="bg-green-50 dark:bg-green-950/30">
+                      {pod.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {selectedPVs.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 flex items-center"><Database className="h-4 w-4 mr-2"/> Persistent Volumes ({selectedPVs.length})</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPVs.map(pv => (
+                    <Badge key={pv.name} variant="outline" className="bg-amber-50 dark:bg-amber-950/30">
+                      {pv.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Resources selection is handled in the previous step, so there should always be selections here */}
+          </div>
+        </CardContent>
+      </Card>
+
       {!compatible ? (
         <Alert variant="destructive">
           <XCircle className="h-4 w-4" />

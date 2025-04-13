@@ -38,7 +38,8 @@ import {
   Users,
   LayoutGrid,
   HardDrive,
-  Info
+  Info,
+  Settings
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -160,12 +161,26 @@ const ClusterDetails = () => {
   const [selectedComponents, setSelectedComponents] = useState<{[key: string]: boolean}>({});
   const [componentCounts, setComponentCounts] = useState<{[key: string]: number}>({});
   const [isMigrationLoading, setIsMigrationLoading] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState<'idle' | 'in-progress' | 'completed' | 'failed'>('idle');
+  const [migrationProgress, setMigrationProgress] = useState(0);
+  const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [migrationId, setMigrationId] = useState<string | null>(null);
   const [migrationYaml, setMigrationYaml] = useState<string>('');
   const [isMigrationYamlOpen, setIsMigrationYamlOpen] = useState(false);
-  const [resourceType, setResourceType] = useState<string>('deployments');
-  const [targetCluster, setTargetCluster] = useState<any>(null);
-  const [availableTargetClusters, setAvailableTargetClusters] = useState<any[]>([]);
+  const [targetCluster, setTargetCluster] = useState<Cluster | null>(null);
+  const [availableTargetClusters, setAvailableTargetClusters] = useState<Cluster[]>([]);
   const [isLoadingTargetClusters, setIsLoadingTargetClusters] = useState(false);
+  const [showMigrationOptions, setShowMigrationOptions] = useState(false);
+  const [migrationOptions, setMigrationOptions] = useState<{
+    targetNamespace: string,
+    preserveNodeAffinity: boolean,
+    migrateVolumes: boolean
+  }>({
+    targetNamespace: '',
+    preserveNodeAffinity: false,
+    migrateVolumes: false
+  });
+  const [resourceType, setResourceType] = useState<string>('deployments');
 
   // Function to fetch namespaces
   const fetchNamespaces = async (kubeconfig: string) => {
@@ -535,8 +550,131 @@ const ClusterDetails = () => {
     }
   };
 
-  const handleMigrate = () => {
-    navigate(`/migration?cluster=${cluster.id}`);
+  // Enhanced migration function with direct migration capabilities
+  const handleMigrate = async () => {
+    // Option 1: Navigate to migration page with pre-filled source cluster
+    if (!targetCluster) {
+      navigate(`/migration?sourceCluster=${cluster.id}&mode=direct`);
+      return;
+    }
+    
+    // Option 2: Perform direct migration if target cluster is already selected
+    setIsMigrationLoading(true);
+    setMigrationStatus('in-progress');
+    setMigrationProgress(0);
+    setMigrationError(null);
+    
+    try {
+      // Gather selected resources from all Kubernetes resource categories
+      const selectedResources = Object.entries(selectedComponents)
+        .filter(([_, selected]) => selected)
+        .map(([key]) => {
+          const [kind, name, namespace = 'default'] = key.split('|');
+          return { kind, name, namespace };
+        });
+      
+      if (selectedResources.length === 0) {
+        toast.warning('No resources selected for migration. Please select resources first.');
+        setIsMigrationLoading(false);
+        return;
+      }
+      
+      // Start the migration process
+      const id = await MigrationService.migrateResources(
+        cluster.kubeconfig,
+        targetCluster.kubeconfig,
+        selectedResources,
+        migrationOptions
+      );
+      
+      setMigrationId(id);
+      toast.success(`Migration started with ID: ${id}`);
+      
+      // Poll for migration status
+      const statusInterval = setInterval(async () => {
+        try {
+          const status = await MigrationService.getMigrationStatus(id);
+          
+          // Update progress
+          if (status.resourcesTotal > 0) {
+            const progressPercentage = Math.floor(
+              (status.resourcesMigrated / status.resourcesTotal) * 100
+            );
+            setMigrationProgress(progressPercentage);
+          }
+          
+          // Check if migration is completed or failed
+          if (status.status === 'completed') {
+            clearInterval(statusInterval);
+            setMigrationStatus('completed');
+            setIsMigrationLoading(false);
+            toast.success(`Migration completed successfully! Migrated ${status.resourcesMigrated} resources.`);
+          } else if (status.status === 'failed') {
+            clearInterval(statusInterval);
+            setMigrationStatus('failed');
+            setMigrationError(status.error || 'Migration failed');
+            setIsMigrationLoading(false);
+            toast.error(`Migration failed: ${status.error || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error('Error checking migration status:', error);
+        }
+      }, 2000);
+      
+      // Cleanup function for the interval
+      return () => clearInterval(statusInterval);
+    } catch (error: any) {
+      setMigrationStatus('failed');
+      setMigrationError(error.message || 'Failed to start migration');
+      setIsMigrationLoading(false);
+      toast.error(`Migration failed: ${error.message || 'Unknown error'}`);
+    }
+  };
+  
+  // Helper function to toggle selection of a resource for migration
+  const toggleResourceSelection = (kind: string, name: string, namespace: string) => {
+    const key = `${kind}|${name}|${namespace}`;
+    setSelectedComponents(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+  
+  // Helper function to select all resources of a particular kind
+  const selectAllResourcesOfKind = (kind: string, selected: boolean) => {
+    let resources: {name: string, namespace: string}[] = [];
+    
+    // Get the resources based on kind
+    switch (kind) {
+      case 'Pod':
+        resources = pods.map(pod => ({ name: pod.name, namespace: pod.namespace }));
+        break;
+      case 'Deployment':
+        resources = deployments.map(deployment => ({ name: deployment.name, namespace: deployment.namespace }));
+        break;
+      case 'Service':
+        resources = services.map(service => ({ name: service.name, namespace: service.namespace }));
+        break;
+      case 'ConfigMap':
+        resources = configMaps.map(configMap => ({ name: configMap.name, namespace: configMap.namespace }));
+        break;
+      case 'Secret':
+        resources = secrets.map(secret => ({ name: secret.name, namespace: secret.namespace }));
+        break;
+      case 'PersistentVolumeClaim':
+        resources = persistentVolumeClaims.map(pvc => ({ name: pvc.name, namespace: pvc.namespace }));
+        break;
+      // Add other resource kinds as needed
+    }
+    
+    // Update selected components
+    const newSelectedComponents = { ...selectedComponents };
+    resources.forEach(resource => {
+      const key = `${kind}|${resource.name}|${resource.namespace}`;
+      newSelectedComponents[key] = selected;
+    });
+    
+    setSelectedComponents(newSelectedComponents);
   };
 
   // Function to fetch pod YAML
@@ -1437,33 +1575,113 @@ const ClusterDetails = () => {
     }
   };
 
-  // Handle component selection for migration
-  const toggleComponentSelection = (kind: string, namespace: string, name: string) => {
-    const componentKey = `${kind}|${namespace}|${name}`;
-    setSelectedComponents(prev => ({
-      ...prev,
-      [componentKey]: !prev[componentKey]
-    }));
-  };
-
   // Function to count selected components by type
-  const countSelectedComponents = () => {
+  const updateComponentCounts = () => {
     const counts: {[key: string]: number} = {};
     
-    Object.keys(selectedComponents).forEach(key => {
-      if (selectedComponents[key]) {
-        const kind = key.split('|')[0];
+    // Count selected components by their kind
+    Object.entries(selectedComponents).forEach(([key, selected]) => {
+      if (selected) {
+        const [kind] = key.split('|');
         counts[kind] = (counts[kind] || 0) + 1;
       }
     });
     
     setComponentCounts(counts);
   };
-
-  // Effect to update component counts when selection changes
-  useEffect(() => {
-    countSelectedComponents();
-  }, [selectedComponents]);
+  
+  // Helper function to toggle component selection
+  const toggleComponentSelection = (kind: string, namespace: string, name: string) => {
+    const componentKey = `${kind}|${namespace}|${name}`;
+    const newSelectedComponents = { ...selectedComponents };
+    
+    newSelectedComponents[componentKey] = !newSelectedComponents[componentKey];
+    setSelectedComponents(newSelectedComponents);
+    
+    // Update component counts
+    updateComponentCounts();
+  };
+  
+  // Function to handle direct migration from the UI
+  const handleDirectMigrate = async () => {
+    if (!targetCluster) {
+      toast.error('Please select a target cluster');
+      return;
+    }
+    
+    const selectedResources = Object.entries(selectedComponents)
+      .filter(([_, selected]) => selected)
+      .map(([key]) => {
+        // Format: kind|namespace|name
+        const parts = key.split('|');
+        return {
+          kind: parts[0],
+          namespace: parts[1],
+          name: parts[2]
+        };
+      });
+    
+    if (selectedResources.length === 0) {
+      toast.error('Please select at least one resource to migrate');
+      return;
+    }
+    
+    setIsMigrationLoading(true);
+    setMigrationStatus('in-progress');
+    setMigrationProgress(0);
+    setMigrationError(null);
+    
+    try {
+      // Start the migration process using MigrationService
+      const id = await MigrationService.migrateResources(
+        cluster.kubeconfig,
+        targetCluster.kubeconfig,
+        selectedResources,
+        migrationOptions
+      );
+      
+      setMigrationId(id);
+      toast.success(`Migration started with ID: ${id}`);
+      
+      // Poll for migration status
+      const statusInterval = setInterval(async () => {
+        try {
+          const status = await MigrationService.getMigrationStatus(id);
+          
+          // Update progress
+          if (status.resourcesTotal > 0) {
+            const progressPercentage = Math.floor(
+              (status.resourcesMigrated / status.resourcesTotal) * 100
+            );
+            setMigrationProgress(progressPercentage);
+          }
+          
+          // Check if migration is completed or failed
+          if (status.status === 'completed') {
+            clearInterval(statusInterval);
+            setMigrationStatus('completed');
+            setIsMigrationLoading(false);
+            toast.success(`Migration completed successfully! Migrated ${status.resourcesMigrated} resources.`);
+          } else if (status.status === 'failed') {
+            clearInterval(statusInterval);
+            setMigrationStatus('failed');
+            setMigrationError(status.error || 'Migration failed');
+            setIsMigrationLoading(false);
+            toast.error(`Migration failed: ${status.error || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error('Error checking migration status:', error);
+        }
+      }, 2000);
+      
+      return () => clearInterval(statusInterval);
+    } catch (error: any) {
+      setMigrationStatus('failed');
+      setMigrationError(error.message || 'Failed to start migration');
+      setIsMigrationLoading(false);
+      toast.error(`Migration failed: ${error.message || 'Unknown error'}`);
+    }
+  };
 
   // Function to generate YAML for selected components
   const handleGenerateYaml = async () => {
@@ -1482,16 +1700,27 @@ const ClusterDetails = () => {
           const [kind, namespace, name] = key.split('|');
           return { kind, namespace, name };
         });
-
-      // Use the MigrationService to generate actual YAML
-      const generatedYaml = await MigrationService.generateYaml(
+      
+      // Generate YAML
+      const yaml = await MigrationService.generateYaml(
         cluster.kubeconfig,
         selectedItems
       );
       
-      setMigrationYaml(generatedYaml);
-      setIsMigrationYamlOpen(true);
-      toast.success('YAML generated for selected components');
+      // Create a downloadable blob
+      const blob = new Blob([yaml], { type: 'text/yaml' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create a link and trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `migration-${new Date().toISOString().slice(0, 10)}.yaml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      toast.success('YAML generated and downloaded');
+      
     } catch (error) {
       console.error('Error generating migration YAML:', error);
       toast.error('Failed to generate migration YAML');
@@ -1499,73 +1728,24 @@ const ClusterDetails = () => {
       setIsMigrationLoading(false);
     }
   };
-
-  // Function to handle direct migration of selected components
-  const handleDirectMigrate = async () => {
-    if (Object.keys(selectedComponents).filter(key => selectedComponents[key]).length === 0) {
-      toast.error('No components selected for migration');
-      return;
-    }
-
-    if (!targetCluster || !targetCluster.kubeconfig) {
-      toast.error('Please select a target cluster with valid kubeconfig');
-      return;
-    }
-
-    setIsMigrationLoading(true);
-    
-    try {
-      // Get selected components
-      const selectedItems: ResourceToMigrate[] = Object.keys(selectedComponents)
-        .filter(key => selectedComponents[key])
-        .map(key => {
-          const [kind, namespace, name] = key.split('|');
-          return { kind, namespace, name };
-        });
-
-      // Set migration options
-      const migrationOptions = {
-        targetNamespace: selectedNamespace || 'default',
-        preserveNodeAffinity: false
-      };
-
-      // Initiate migration
-      const migrationId = await MigrationService.migrateResources(
-        cluster.kubeconfig,
-        targetCluster.kubeconfig,
-        selectedItems,
-        migrationOptions
-      );
-      
-      toast.success(`Migration initiated! Track status with ID: ${migrationId}`);
-      
-      // Redirect to migration status page or dashboard with success message
-      navigate(`/dashboard?migration=${migrationId}`);
-      
-    } catch (error) {
-      console.error('Error initiating migration:', error);
-      toast.error(`Failed to initiate migration: ${(error as Error).message}`);
-    } finally {
-      setIsMigrationLoading(false);
-    }
-  };
-
+  
   // Fetch available target clusters for direct migration
   useEffect(() => {
     const fetchTargetClusters = async () => {
-      if (!user) return;
+      if (!user || !cluster) return;
       
       setIsLoadingTargetClusters(true);
+      
       try {
         // Fetch clusters suitable as migration targets (multi-tenant clusters)
         const clusters = await clusterService.getAllClusters(user.id);
-        // Filter for multi-tenant clusters or other valid targets
+        // Filter for multi-tenant clusters or other valid targets that aren't the current cluster
         const validTargets = clusters.filter(c => 
           c.type === 'tenant' && c.id !== cluster?.id
         );
         
         setAvailableTargetClusters(validTargets);
-        // Pre-select the first valid target if available
+        // Pre-select the first valid target if available and none currently selected
         if (validTargets.length > 0 && !targetCluster) {
           setTargetCluster(validTargets[0]);
         }
@@ -1577,10 +1757,11 @@ const ClusterDetails = () => {
       }
     };
     
-    if (cluster && activeTab === 'migration') {
+    // Only fetch target clusters when on the migration tab
+    if (activeTab === 'migration') {
       fetchTargetClusters();
     }
-  }, [user, cluster, activeTab]);
+  }, [user, cluster, activeTab, targetCluster]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -2794,6 +2975,38 @@ const ClusterDetails = () => {
                                 </p>
                               </div>
 
+                              {/* Migration Progress Display */}
+                              {migrationStatus === 'in-progress' && (
+                                <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-100">
+                                  <div className="flex items-center mb-2">
+                                    <Loader2 className="h-4 w-4 animate-spin text-blue-600 mr-2" />
+                                    <h4 className="text-sm font-medium text-blue-800">Migration in progress</h4>
+                                  </div>
+                                  <Progress value={migrationProgress} className="h-2 mb-2" />
+                                  <p className="text-xs text-blue-600">{migrationProgress}% complete</p>
+                                </div>
+                              )}
+                              
+                              {migrationStatus === 'completed' && (
+                                <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-100">
+                                  <div className="flex items-center">
+                                    <CheckCircle2 className="h-4 w-4 text-green-600 mr-2" />
+                                    <h4 className="text-sm font-medium text-green-800">Migration completed successfully</h4>
+                                  </div>
+                                  <p className="text-xs text-green-600 mt-1">All selected resources have been migrated.</p>
+                                </div>
+                              )}
+                              
+                              {migrationStatus === 'failed' && (
+                                <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-100">
+                                  <div className="flex items-center">
+                                    <AlertCircle className="h-4 w-4 text-red-600 mr-2" />
+                                    <h4 className="text-sm font-medium text-red-800">Migration failed</h4>
+                                  </div>
+                                  <p className="text-xs text-red-600 mt-1">{migrationError}</p>
+                                </div>
+                              )}
+
                               <div className="flex justify-between items-center mb-4">
                                 <div className="flex gap-3">
                                   <select
@@ -2843,6 +3056,66 @@ const ClusterDetails = () => {
                                         ))
                                       )}
                                     </select>
+                                    
+                                    {/* Migration Options Menu */}
+                                    <div className="relative ml-2">
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm"
+                                        onClick={() => setShowMigrationOptions(!showMigrationOptions)}
+                                        className="flex items-center"
+                                      >
+                                        <Settings className="h-4 w-4 mr-1" /> Options
+                                      </Button>
+                                      
+                                      {showMigrationOptions && (
+                                        <div className="absolute top-full right-0 mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-md p-4 z-10 w-64">
+                                          <h4 className="text-sm font-medium mb-3">Migration Options</h4>
+                                          
+                                          <div className="space-y-3">
+                                            <div className="space-y-1">
+                                              <Label htmlFor="target-namespace" className="text-xs">Target Namespace</Label>
+                                              <input
+                                                id="target-namespace"
+                                                type="text"
+                                                className="w-full p-1 text-sm rounded-md border"
+                                                placeholder="default"
+                                                value={migrationOptions.targetNamespace}
+                                                onChange={(e) => setMigrationOptions(prev => ({
+                                                  ...prev,
+                                                  targetNamespace: e.target.value
+                                                }))}
+                                              />
+                                              <p className="text-xs text-muted-foreground">Leave empty to preserve original namespaces</p>
+                                            </div>
+                                            
+                                            <div className="flex items-center space-x-2">
+                                              <Checkbox 
+                                                id="preserve-node-affinity"
+                                                checked={migrationOptions.preserveNodeAffinity}
+                                                onCheckedChange={(checked) => setMigrationOptions(prev => ({
+                                                  ...prev,
+                                                  preserveNodeAffinity: checked === true
+                                                }))}
+                                              />
+                                              <Label htmlFor="preserve-node-affinity" className="text-xs">Preserve Node Affinity</Label>
+                                            </div>
+                                            
+                                            <div className="flex items-center space-x-2">
+                                              <Checkbox 
+                                                id="migrate-volumes"
+                                                checked={migrationOptions.migrateVolumes}
+                                                onCheckedChange={(checked) => setMigrationOptions(prev => ({
+                                                  ...prev,
+                                                  migrateVolumes: checked === true
+                                                }))}
+                                              />
+                                              <Label htmlFor="migrate-volumes" className="text-xs">Migrate Volumes</Label>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
                                     
                                     <Button
                                       size="sm"

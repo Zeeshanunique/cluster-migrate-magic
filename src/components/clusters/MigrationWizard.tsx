@@ -47,11 +47,10 @@ import {
   getEKSNodes, 
   getEKSPods, 
   getEKSPVs,
-  migrateResources,
   checkClusterCompatibility,
   generateKubeconfig
 } from '@/utils/aws';
-import MigrationService from '@/services/MigrationService';
+import MigrationService from '@/utils/migrationService';
 
 const steps = [
   { 
@@ -123,6 +122,8 @@ const MigrationWizard = () => {
   const [sourceConnected, setSourceConnected] = useState(false);
   const [targetConnected, setTargetConnected] = useState(false);
   const [loadingResources, setLoadingResources] = useState(false);
+  // Use correct Namespace interface matching ResourceInventory component
+  const [namespaces, setNamespaces] = useState<{name: string, status: string, age: string, labels: Record<string, string>, selected: boolean}[]>([]);
   const [nodes, setNodes] = useState<EKSNodeInfo[]>([]);
   const [pods, setPods] = useState<EKSPodInfo[]>([]);
   const [persistentVolumes, setPersistentVolumes] = useState<EKSPVInfo[]>([]);
@@ -259,7 +260,7 @@ const MigrationWizard = () => {
     setStatus('idle');
   };
 
-  // Load resources from source cluster
+  // Load resources from source cluster following the same pattern as ClusterDetails
   const loadResources = async () => {
     if (!sourceConnected) {
       toast.error("Please connect to the source cluster first");
@@ -270,13 +271,48 @@ const MigrationWizard = () => {
     setStatus('running');
 
     try {
-      // Fetch nodes, pods, and persistent volumes in parallel
+      // Use the same approach as ClusterDetails to organize resources by Kubernetes hierarchy
+      console.log('Fetching resources using Kubernetes standard hierarchy');
+      
+      // Step 1: Fetch namespaces first - this matches what ClusterDetails page does
+      const namespacesData = await fetch(`http://localhost:3001/api/k8s/namespaces`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          kubeconfig: sourceConfig.kubeconfig,
+          region: sourceConfig.region,
+          clusterName: sourceConfig.clusterName 
+        })
+      }).then(res => res.json())
+        .then(data => data.items?.map((ns: any) => {
+          // Calculate age based on creationTimestamp
+          const creationTime = ns.metadata?.creationTimestamp ? new Date(ns.metadata.creationTimestamp) : new Date();
+          const now = new Date();
+          const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+          const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+          
+          return {
+            name: ns.metadata.name,
+            status: ns.status?.phase || 'Active',
+            age: age, // Add age property to match Namespace interface
+            labels: ns.metadata?.labels || {},
+            selected: false
+          };
+        }) || [])
+        .catch(err => {
+          console.error('Failed to fetch namespaces:', err);
+          return [];
+        });
+      
+      // Fetch core resources in parallel - just like ClusterDetails
       const [nodesData, podsData, pvsData] = await Promise.all([
         getEKSNodes(sourceConfig),
         getEKSPods(sourceConfig),
         getEKSPVs(sourceConfig)
       ]);
 
+      // Set all resources following standard Kubernetes organization
+      setNamespaces(namespacesData);
       setNodes(nodesData);
       setPods(podsData);
       setPersistentVolumes(pvsData);
@@ -292,40 +328,78 @@ const MigrationWizard = () => {
     }
   };
 
-  // Handle pod selection change
-  const handlePodSelectionChange = (pod: EKSPodInfo, selected: boolean) => {
-    setPods(prevPods => 
-      prevPods.map(p => 
-        p.name === pod.name ? { ...p, selected } : p
-      )
-    );
+  // Handle resource selection change (generic function for all resource types)
+  const handleResourceSelectionChange = (resourceType: string, resource: any, selected: boolean) => {
+    console.log(`Selection changed for ${resourceType}: ${resource.name} -> ${selected}`);
+    
+    switch(resourceType) {
+      case 'namespaces':
+        const updatedNamespaces = namespaces.map(ns => 
+          ns.name === resource.name ? { ...ns, selected } : ns
+        );
+        setNamespaces(updatedNamespaces);
+        break;
+      case 'nodes':
+        const updatedNodes = nodes.map(node => 
+          node.name === resource.name ? { ...node, selected } : node
+        );
+        setNodes(updatedNodes);
+        break;
+      case 'pods':
+        const updatedPods = pods.map(p => 
+          p.name === resource.name ? { ...p, selected } : p
+        );
+        setPods(updatedPods);
+        break;
+      case 'persistentVolumes':
+      case 'pvs': // Support alias for backward compatibility
+        const updatedPVs = persistentVolumes.map(p => 
+          p.name === resource.name ? { ...p, selected } : p
+        );
+        setPersistentVolumes(updatedPVs);
+        break;
+      default:
+        console.log(`Selection change for ${resourceType} not yet implemented`);
+    }
   };
 
-  // Handle persistent volume selection change
-  const handlePVSelectionChange = (pv: EKSPVInfo, selected: boolean) => {
-    setPersistentVolumes(prevPVs => 
-      prevPVs.map(p => 
-        p.name === pv.name ? { ...p, selected } : p
-      )
-    );
-  };
+  // No replacement needed - removing duplicate function
 
-  // Handle select all functionality
-  const handleSelectAll = (resourceType: 'pods' | 'pvs', selectAll: boolean) => {
-    if (resourceType === 'pods') {
-      setPods(prevPods => prevPods.map(pod => ({ ...pod, selected: selectAll })));
-    } else {
-      setPersistentVolumes(prevPVs => prevPVs.map(pv => ({ ...pv, selected: selectAll })));
+  // Handle select all functionality for any resource type
+  const handleSelectAll = (resourceType: string, selectAll: boolean) => {
+    console.log(`Select all for ${resourceType}: ${selectAll}`);
+    
+    switch(resourceType) {
+      case 'namespaces':
+        setNamespaces(namespaces.map(ns => ({ ...ns, selected: selectAll })));
+        break;
+      case 'nodes':
+        setNodes(nodes.map(node => ({ ...node, selected: selectAll })));
+        break;
+      case 'pods':
+        setPods(pods.map(pod => ({ ...pod, selected: selectAll })));
+        break;
+      case 'persistentVolumes':
+      case 'pvs': // Support legacy 'pvs' value for backward compatibility
+        setPersistentVolumes(persistentVolumes.map(pv => ({ ...pv, selected: selectAll })));
+        break;
+      default:
+        console.log(`Select all for ${resourceType} not implemented`);
     }
   };
 
   // Proceed to compatibility check
   const proceedToCompatibilityCheck = async () => {
-    // Check if any resources are selected
+    // Check if any resources are selected across all resource types
+    const selectedNamespaces = namespaces.filter(ns => ns.selected).length;
+    const selectedNodes = nodes.filter(node => node.selected).length;
     const selectedPods = pods.filter(pod => pod.selected).length;
     const selectedPVs = persistentVolumes.filter(pv => pv.selected).length;
     
-    if (selectedPods === 0 && selectedPVs === 0) {
+    const totalSelected = selectedNamespaces + selectedNodes + selectedPods + selectedPVs;
+    console.log(`Selected resources: ${selectedNamespaces} namespaces, ${selectedNodes} nodes, ${selectedPods} pods, ${selectedPVs} PVs`);
+    
+    if (totalSelected === 0) {
       toast.error("Please select at least one resource to migrate");
       return;
     }
@@ -356,23 +430,47 @@ const MigrationWizard = () => {
     try {
       setStatus('running');
       
-      // Filter only selected resources
+      // Filter only selected resources for all resource types
+      const selectedNamespacesToMigrate = namespaces.filter(ns => ns.selected);
+      const selectedNodesToMigrate = nodes.filter(node => node.selected);
       const selectedPodsToMigrate = pods.filter(pod => pod.selected);
       const selectedPVsToMigrate = persistentVolumes.filter(pv => pv.selected);
       
-      if (selectedPodsToMigrate.length === 0 && selectedPVsToMigrate.length === 0) {
-        toast.error("Please select at least one resource to migrate");
+      // Count total selected resources across all types
+      const totalSelected = selectedNamespacesToMigrate.length + selectedNodesToMigrate.length + 
+                           selectedPodsToMigrate.length + selectedPVsToMigrate.length;
+      
+      console.log(`Selected for migration: ${selectedNamespacesToMigrate.length} namespaces, ${selectedNodesToMigrate.length} nodes, ${selectedPodsToMigrate.length} pods, ${selectedPVsToMigrate.length} PVs`);
+      
+      // We shouldn't need this check since the button is disabled if nothing is selected,
+      // but keeping it as a safety measure
+      if (totalSelected === 0) {
+        toast.error("No resources selected for migration");
         setStatus('idle');
         return;
       }
       
       // Convert to resource format expected by the API
       const resources = [
+        // Include namespaces
+        ...selectedNamespacesToMigrate.map(ns => ({
+          kind: 'Namespace',
+          namespace: '',  // Namespaces don't have a parent namespace
+          name: ns.name
+        })),
+        // Include nodes
+        ...selectedNodesToMigrate.map(node => ({
+          kind: 'Node',
+          namespace: '',  // Nodes are cluster-level resources
+          name: node.name
+        })),
+        // Include pods
         ...selectedPodsToMigrate.map(pod => ({
           kind: 'Pod',
-          namespace: pod.namespace,
+          namespace: pod.namespace || 'default',
           name: pod.name
         })),
+        // Include persistent volumes
         ...selectedPVsToMigrate.map(pv => ({
           kind: 'PersistentVolumeClaim',
           namespace: 'default', // Assuming PVs are in default namespace
@@ -395,43 +493,100 @@ const MigrationWizard = () => {
         migrationOptions
       );
       
-      // Poll migration status
-      let migrationComplete = false;
+      // Set up a polling mechanism to track real migration progress
+      let attempts = 0;
+      const maxAttempts = 30; // Maximum polling attempts (5 minutes @ 10 second intervals)
+      const pollInterval = 5000; // Poll every 5 seconds
       
-      const updateStatus = async () => {
+      // Set timeout to ensure we don't get stuck in case of server issues
+      const timeoutId = setTimeout(() => {
+        if (status === 'running') {
+          console.error(`Migration ${migrationId} timed out`);
+          setStatus('error');
+          setError('Migration timed out. Please check cluster status manually.');
+          toast.error('Migration timed out');
+        }
+      }, 10 * 60 * 1000); // 10 minute maximum timeout
+      
+      // Update UI right away to show initial progress
+      setMigrationProgress({
+        step: 1,
+        message: 'Starting migration: Preparing resources'
+      });
+      
+      // Helper function to convert migration step strings to step numbers for UI progress
+      const getStepNumberFromStatus = (stepString: string): number => {
+        if (!stepString) return 1;
+        
+        // Map common step strings to step numbers
+        if (stepString.includes('Initializing') || stepString.includes('Preparing')) return 1;
+        if (stepString.includes('Namespace')) return 2;
+        if (stepString.includes('ConfigMap') || stepString.includes('Secret')) return 2;
+        if (stepString.includes('PersistentVolume')) return 3;
+        if (stepString.includes('Service') || stepString.includes('Ingress')) return 3;
+        if (stepString.includes('Deployment') || stepString.includes('StatefulSet') || 
+            stepString.includes('DaemonSet') || stepString.includes('Job')) return 4;
+        if (stepString.includes('Pod')) return 4;
+        if (stepString.includes('Completed') || stepString.includes('Finalizing')) return 5;
+        
+        // Default to step 3 (middle step) if not recognized
+        return 3;
+      };
+      
+      // Define a function to poll migration status
+      const pollMigrationStatus = async () => {
+        if (attempts >= maxAttempts || status !== 'running') {
+          clearTimeout(timeoutId);
+          return;
+        }
+        
+        attempts++;
         try {
-          const status = await MigrationService.getMigrationStatus(migrationId);
+          // Get real migration status from the server
+          const migrationStatus = await MigrationService.getMigrationStatus(migrationId);
+          console.log(`Migration status update (attempt ${attempts}):`, migrationStatus);
           
-          // Update UI based on status
-          setMigrationProgress({
-            step: getStepNumberFromStatus(status.currentStep),
-            message: `${status.currentStep}: ${status.resourcesMigrated}/${status.resourcesTotal} resources`
-          });
-          
-          setProgress(Math.floor((status.resourcesMigrated / status.resourcesTotal) * 100));
-          
-          if (status.status === 'completed') {
+          // Update the UI based on real status
+          if (migrationStatus.status === 'completed') {
             setStatus('completed');
-            migrationComplete = true;
-            toast.success(`Migration completed successfully! Migrated ${status.resourcesMigrated} resources.`);
-          } else if (status.status === 'failed') {
+            setProgress(100);
+            setMigrationProgress({
+              step: 5,
+              message: `Migration completed successfully: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources migrated`
+            });
+            toast.success(`Migration completed successfully!`);
+            clearTimeout(timeoutId);
+            setCurrentStep(3); // Move to the completion step
+            return;
+          } else if (migrationStatus.status === 'failed') {
             setStatus('error');
-            setError(status.error || 'Migration failed');
-            migrationComplete = true;
-            toast.error(`Migration failed: ${status.error}`);
+            setError(migrationStatus.error || 'Migration failed with an unknown error');
+            toast.error(`Migration failed: ${migrationStatus.error || 'Unknown error'}`);
+            clearTimeout(timeoutId);
+            return;
+          } else {
+            // Still running, update progress
+            const stepNumber = getStepNumberFromStatus(migrationStatus.currentStep);
+            const progressPercent = Math.floor((migrationStatus.resourcesMigrated / migrationStatus.resourcesTotal) * 100);
+            
+            setMigrationProgress({
+              step: stepNumber,
+              message: `${migrationStatus.currentStep}: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources`
+            });
+            setProgress(progressPercent);
+            
+            // Continue polling
+            setTimeout(pollMigrationStatus, pollInterval);
           }
         } catch (error) {
-          console.error('Error checking migration status:', error);
+          console.error(`Error polling migration status (attempt ${attempts}):`, error);
+          // Continue polling despite errors, up to max attempts
+          setTimeout(pollMigrationStatus, pollInterval);
         }
       };
       
-      // Poll status until migration completes
-      while (!migrationComplete) {
-        await updateStatus();
-        if (!migrationComplete) {
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2 seconds
-        }
-      }
+      // Start polling
+      setTimeout(pollMigrationStatus, pollInterval);
       
     } catch (error) {
       console.error('Migration failed:', error);
@@ -464,6 +619,7 @@ const MigrationWizard = () => {
     setError(null);
     setSourceConnected(false);
     setTargetConnected(false);
+    setNamespaces([]);
     setNodes([]);
     setPods([]);
     setPersistentVolumes([]);
@@ -631,14 +787,15 @@ const MigrationWizard = () => {
         return (
           <div className="space-y-6 py-4">
             <ResourceInventory
+              namespaces={namespaces as any} // Type assertion to resolve interface mismatch
+              nodes={nodes}
               pods={pods}
               persistentVolumes={persistentVolumes}
-              nodes={nodes}
-              onPodSelectionChange={handlePodSelectionChange}
-              onPVSelectionChange={handlePVSelectionChange}
+              onResourceSelectionChange={handleResourceSelectionChange}
               onSelectAll={handleSelectAll}
               loadResources={loadResources}
               isLoading={loadingResources}
+              sourceCluster={sourceCluster}
             />
             
             {error && (
@@ -660,6 +817,10 @@ const MigrationWizard = () => {
               sourceConfig={sourceConfig}
               targetConfig={targetConfig}
               compatibilityResult={compatibility}
+              namespaces={namespaces}
+              nodes={nodes}
+              pods={pods}
+              persistentVolumes={persistentVolumes}
             />
             
             {error && (
@@ -837,7 +998,12 @@ const MigrationWizard = () => {
             </Button>
             <Button
               onClick={proceedToCompatibilityCheck}
-              disabled={status === 'running' || pods.filter(p => p.selected).length === 0 && persistentVolumes.filter(pv => pv.selected).length === 0}
+              disabled={status === 'running' || (
+                namespaces.filter(ns => ns.selected).length === 0 &&
+                nodes.filter(node => node.selected).length === 0 &&
+                pods.filter(pod => pod.selected).length === 0 &&
+                persistentVolumes.filter(pv => pv.selected).length === 0
+              )}
             >
               {status === 'running' ? (
                 <>
