@@ -1,0 +1,62 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: multi-tenant-eks
+  region: us-west-2
+  version: "1.28"
+
+# IAM configuration
+iam:
+  withOIDC: true
+  serviceAccounts:
+    - metadata:
+        name: cluster-autoscaler
+        namespace: kube-system
+      wellKnownPolicies:
+        autoScaler: true
+
+# Networking
+vpc:
+  cidr: 10.0.0.0/16
+  nat:
+    gateway: Single
+
+# Managed node groups
+managedNodeGroups:
+  - name: system-ng
+    instanceType: t3.medium
+    minSize: 2
+    maxSize: 5
+    desiredCapacity: 3
+    volumeSize: 80
+    labels:
+      role: system
+    tags:
+      nodegroup-role: system
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+  
+  - name: tenant-ng
+    instanceType: t3.large
+    minSize: 2
+    maxSize: 10
+    desiredCapacity: 3
+    volumeSize: 100
+    labels:
+      role: tenant
+    tags:
+      nodegroup-role: tenant
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+
+# Add-ons
+addons:
+  - name: vpc-cni
+    version: latest
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest 

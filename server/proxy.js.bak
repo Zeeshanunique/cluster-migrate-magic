@@ -2171,6 +2171,9 @@ function determineResourceApiPathForCreation(kind, namespace) {
   return apiPathMap[kind] || null;
 }
 
+// Import our tenant endpoints
+import { attachTenantEndpoints } from './endpoints/tenant-endpoints.js';
+
 // Attach tenant-specific endpoints
 attachTenantEndpoints(app, makeK8sRequestWithRetry);
 

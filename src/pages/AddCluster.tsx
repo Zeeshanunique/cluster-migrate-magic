@@ -30,7 +30,7 @@ const AddCluster = () => {
   const navigate = useNavigate();
   
   const [clusterName, setClusterName] = useState('');
-  const [clusterType, setClusterType] = useState<'single' | 'multi'>('single');
+  const [clusterType, setClusterType] = useState<'single' | 'tenant'>('single');
   const [kubeconfig, setKubeconfig] = useState('');
   const [configFile, setConfigFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -306,21 +306,21 @@ const AddCluster = () => {
                   <Tabs 
                     defaultValue="single" 
                     value={clusterType}
-                    onValueChange={(value) => setClusterType(value as 'single' | 'multi')}
+                    onValueChange={(value) => setClusterType(value as 'single' | 'tenant')}
                     className="w-full"
                   >
                     <TabsList className="grid grid-cols-2 w-full">
                       <TabsTrigger value="single">Single Cluster</TabsTrigger>
-                      <TabsTrigger value="multi">Multi Cluster</TabsTrigger>
+                      <TabsTrigger value="tenant">Multi-Tenant Cluster</TabsTrigger>
                     </TabsList>
                     <TabsContent value="single" className="mt-2">
                       <p className="text-sm text-muted-foreground">
-                        Single cluster configuration for standard workloads. Can be upgraded to multi-cluster later.
+                        Single cluster configuration for standard workloads. Can be upgraded to multi-tenant later.
                       </p>
                     </TabsContent>
-                    <TabsContent value="multi" className="mt-2">
+                    <TabsContent value="tenant" className="mt-2">
                       <p className="text-sm text-muted-foreground">
-                        Multi-cluster setup for high availability and cross-region deployments.
+                        Multi-tenant setup for resource isolation and shared infrastructure across namespaces.
                       </p>
                     </TabsContent>
                   </Tabs>

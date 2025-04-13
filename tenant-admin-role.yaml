@@ -1,0 +1,19 @@
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: tenant-admin
+  namespace: tenant-a
+rules:
+- apiGroups: ["", "extensions", "apps", "networking.k8s.io", "batch"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: tenant-admin
+  namespace: tenant-b
+rules:
+- apiGroups: ["", "extensions", "apps", "networking.k8s.io", "batch"]
+  resources: ["*"]
+  verbs: ["*"] 

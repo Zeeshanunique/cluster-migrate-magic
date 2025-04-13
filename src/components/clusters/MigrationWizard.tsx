@@ -51,6 +51,7 @@ import {
   checkClusterCompatibility,
   generateKubeconfig
 } from '@/utils/aws';
+import MigrationService from '@/services/MigrationService';
 
 const steps = [
   { 
@@ -350,110 +351,108 @@ const MigrationWizard = () => {
     }
   };
 
-  // Start migration process
-  const startMigration = async () => {
-    if (!sourceConnected || !targetConnected) {
-      toast.error("Please ensure both clusters are connected");
-      return;
-    }
-    
-    setStatus('running');
-    
+  // Handle migration execution
+  const handleStartMigration = async () => {
     try {
-      // Prevent duplicate migration if source is already a multi-tenant
-      if (sourceCluster?.type === 'tenant') {
-        toast.warning(`Cluster "${sourceCluster.name}" is already a multi-tenant`);
-        setStatus('error');
-        setError("Source cluster is already a multi-tenant");
+      setStatus('running');
+      
+      // Filter only selected resources
+      const selectedPodsToMigrate = pods.filter(pod => pod.selected);
+      const selectedPVsToMigrate = persistentVolumes.filter(pv => pv.selected);
+      
+      if (selectedPodsToMigrate.length === 0 && selectedPVsToMigrate.length === 0) {
+        toast.error("Please select at least one resource to migrate");
+        setStatus('idle');
         return;
       }
       
-      // Get selected resources
-    const selectedPods = pods.filter(pod => pod.selected);
-    const selectedPVs = persistentVolumes.filter(pv => pv.selected);
-    
-      if (selectedPods.length === 0 && selectedPVs.length === 0) {
-        toast.warning("No resources selected for migration");
-        setStatus('error');
-        setError("Please select at least one resource to migrate");
-        return;
-      }
+      // Convert to resource format expected by the API
+      const resources = [
+        ...selectedPodsToMigrate.map(pod => ({
+          kind: 'Pod',
+          namespace: pod.namespace,
+          name: pod.name
+        })),
+        ...selectedPVsToMigrate.map(pv => ({
+          kind: 'PersistentVolumeClaim',
+          namespace: 'default', // Assuming PVs are in default namespace
+          name: pv.name
+        }))
+      ];
       
-      // Generate a kubeconfig for the target cluster
-      let targetKubeconfig = targetConfig.kubeconfig;
-      if (!targetKubeconfig && targetConfig.clusterName) {
-        try {
-          targetKubeconfig = await generateKubeconfig(targetConfig);
-        } catch (error) {
-          console.error("Failed to generate kubeconfig:", error);
-          setStatus('error');
-          setError(`Failed to generate kubeconfig: ${(error as Error).message}`);
-          return;
-        }
-      }
+      // Set up migration options
+      const migrationOptions = {
+        targetNamespace: 'default', // Default target namespace
+        migrateVolumes: true,
+        preserveNodeAffinity: false
+      };
       
-      // Execute migration
-      setMigrationProgress({ step: 0, message: "Starting migration process..." });
-      
-      const migrationSuccessful = await migrateResources(
-        sourceConfig,
-        targetConfig,
-        selectedPods,
-        selectedPVs,
-        (step, message) => {
-          setMigrationProgress({ step, message });
-        }
+      // Start migration using the service
+      const migrationId = await MigrationService.migrateResources(
+        sourceConfig.kubeconfig!,
+        targetConfig.kubeconfig!,
+        resources,
+        migrationOptions
       );
       
-      if (migrationSuccessful) {
-        // Update the source cluster in Supabase
-        if (sourceCluster && user?.id) {
-          setMigrationProgress({ 
-            step: 4, 
-            message: "Migration successful. Updating database records..." 
+      // Poll migration status
+      let migrationComplete = false;
+      
+      const updateStatus = async () => {
+        try {
+          const status = await MigrationService.getMigrationStatus(migrationId);
+          
+          // Update UI based on status
+          setMigrationProgress({
+            step: getStepNumberFromStatus(status.currentStep),
+            message: `${status.currentStep}: ${status.resourcesMigrated}/${status.resourcesTotal} resources`
           });
           
-          const success = await clusterService.convertToMultiTenant(sourceCluster.id, {
-            name: sourceCluster.name, // Keep original name
-            region: targetConfig.region, // Use target region
-            nodes: sourceCluster.nodes + (nodes.length || 1), // Add nodes from source
-            aws_account_id: targetConfig.clusterName.includes('aws') ? 
-              `${Math.floor(Math.random() * 1000000000000)}` : undefined,
-            aws_role_arn: targetConfig.useIAMRole ? 
-              `arn:aws:iam::${Math.floor(Math.random() * 1000000000000)}:role/EKSClusterRole` : undefined,
-            kubeconfig: targetKubeconfig
-          });
+          setProgress(Math.floor((status.resourcesMigrated / status.resourcesTotal) * 100));
           
-          if (!success) {
-            // Migration completed but database update failed
-            setMigrationProgress({ 
-              step: 5, 
-              message: "Warning: Resources migrated but database update failed. Manual verification needed." 
-            });
-            toast.warning("Migration completed but database update failed. Please verify cluster status.");
-          } else {
-            // Migration and database update successful
-            setMigrationProgress({ 
-              step: 5, 
-              message: "Migration complete! Database records updated successfully." 
-            });
+          if (status.status === 'completed') {
+            setStatus('completed');
+            migrationComplete = true;
+            toast.success(`Migration completed successfully! Migrated ${status.resourcesMigrated} resources.`);
+          } else if (status.status === 'failed') {
+            setStatus('error');
+            setError(status.error || 'Migration failed');
+            migrationComplete = true;
+            toast.error(`Migration failed: ${status.error}`);
           }
+        } catch (error) {
+          console.error('Error checking migration status:', error);
         }
-        
-        // Advance to verification step
-        setCurrentStep(currentStep + 1);
-        setProgress(100);
-        setStatus('completed');
-        toast.success("Migration completed successfully!");
-      } else {
-        setStatus('error');
-        setError("Migration failed - unable to transfer resources");
+      };
+      
+      // Poll status until migration completes
+      while (!migrationComplete) {
+        await updateStatus();
+        if (!migrationComplete) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2 seconds
+        }
       }
+      
     } catch (error) {
-      console.error("Migration failed:", error);
+      console.error('Migration failed:', error);
       setStatus('error');
       setError(`Migration failed: ${(error as Error).message}`);
+      toast.error(`Migration failed: ${(error as Error).message}`);
     }
+  };
+
+  // Helper function to convert status string to step number
+  const getStepNumberFromStatus = (status: string): number => {
+    const statusMap: { [key: string]: number } = {
+      'initializing': 1,
+      'extracting': 2,
+      'transforming': 3,
+      'applying': 4,
+      'verifying': 5,
+      'completed': 6
+    };
+    
+    return statusMap[status] || 1;
   };
 
   // Reset migration process
@@ -867,7 +866,7 @@ const MigrationWizard = () => {
               Back
             </Button>
             <Button 
-              onClick={startMigration} 
+              onClick={handleStartMigration} 
               disabled={status === 'running' || !compatibility.compatible}
             >
               {status === 'running' ? (

@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-other-namespaces
+  namespace: tenant-a
+spec:
+  podSelector: {}
+  ingress:
+  - from:
+    - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-other-namespaces
+  namespace: tenant-b
+spec:
+  podSelector: {}
+  ingress:
+  - from:
+    - podSelector: {} 

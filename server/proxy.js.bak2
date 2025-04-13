@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { attachTenantEndpoints } from './endpoints/tenant-endpoints.js';
+// import { attachTenantEndpoints } from './endpoints/tenant-endpoints.js';
 
 // Convert exec to promise-based
 const execPromise = promisify(exec);
@@ -2170,6 +2170,9 @@ function determineResourceApiPathForCreation(kind, namespace) {
   
   return apiPathMap[kind] || null;
 }
+
+// The import is already at the top of the file (line 11)
+// import { attachTenantEndpoints } from './endpoints/tenant-endpoints.js';
 
 // Attach tenant-specific endpoints
 attachTenantEndpoints(app, makeK8sRequestWithRetry);

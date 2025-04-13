@@ -43,6 +43,17 @@ export const KUBERNETES_API = {
   // Debug and utility
   DEBUG_TOKEN: `${API_BASE_URL}/api/k8s/debug/token`,
   GET_KUBECONFIG_DETAILS: `${API_BASE_URL}/api/k8s/kubeconfig-details`,
+  
+  // Migration utilities
+  GENERATE_YAML: `${API_BASE_URL}/api/k8s/generate-yaml`,
+  MIGRATE_RESOURCES: `${API_BASE_URL}/api/k8s/migrate`,
+  MIGRATION_STATUS: `${API_BASE_URL}/api/k8s/migration`,
+  
+  // Multi-tenant specific endpoints
+  TENANT_NAMESPACES: `${API_BASE_URL}/api/k8s/tenant/namespaces`,
+  TENANT_PODS: `${API_BASE_URL}/api/k8s/tenant/pods`,
+  TENANT_DEPLOYMENTS: `${API_BASE_URL}/api/k8s/tenant/deployments`,
+  TENANT_RESOURCE_USAGE: `${API_BASE_URL}/api/k8s/tenant/resource-usage`,
 };
 
 // List of endpoints in development that aren't fully implemented yet
@@ -66,7 +77,12 @@ const DEVELOPMENT_ENDPOINTS = [
   '/api/k8s/persistentvolumeclaims',
   '/api/k8s/storageclasses',
   '/api/k8s/metrics',
-  '/api/k8s/logs'
+  '/api/k8s/logs',
+  // Add tenant endpoints to development endpoints
+  '/api/k8s/tenant/namespaces',
+  '/api/k8s/tenant/pods',
+  '/api/k8s/tenant/deployments',
+  '/api/k8s/tenant/resource-usage',
 ];
 
 // Helper function to make API requests to the proxy server
@@ -181,7 +197,45 @@ export const apiRequest = async (
   }
 };
 
+// Add a specific function for multi-tenant API requests
+export const apiTenantRequest = async (
+  cluster: any,
+  endpoint: string, 
+  method: 'GET' | 'POST' = 'POST',
+  additionalParams?: any
+) => {
+  console.log(`[apiTenantRequest] Starting request to ${endpoint} for cluster ${cluster?.name}`);
+  
+  if (!cluster?.kubeconfig) {
+    console.error('[apiTenantRequest] Missing kubeconfig');
+    throw new Error('Missing kubeconfig for multi-tenant request');
+  }
+
+  if (cluster.type !== 'tenant') {
+    console.warn(`[apiTenantRequest] Called with non-tenant cluster type: ${cluster.type}`);
+  }
+
+  // For tenant requests, we must use POST and include the kubeconfig
+  const body = {
+    kubeconfig: cluster.kubeconfig,
+    ...additionalParams
+  };
+
+  console.log(`[apiTenantRequest] Making request to ${endpoint} with method ${method}`);
+  
+  try {
+    // Use the regular apiRequest function with our tenant endpoint
+    const result = await apiRequest(endpoint, 'POST', body);
+    console.log(`[apiTenantRequest] Request to ${endpoint} successful`);
+    return result;
+  } catch (error) {
+    console.error(`[apiTenantRequest] Error in request to ${endpoint}:`, error);
+    throw error;
+  }
+};
+
 export default {
   KUBERNETES_API,
-  apiRequest
+  apiRequest,
+  apiTenantRequest
 };

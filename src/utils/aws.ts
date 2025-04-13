@@ -1,4 +1,3 @@
-
 import { toast } from "sonner";
 import { supabase } from './supabase';
 
@@ -160,7 +159,7 @@ export const getEKSPVs = async (config: EKSClusterConfig): Promise<EKSPVInfo[]> 
   }
 };
 
-// Mock function to simulate resource migration between clusters
+// Real implementation of the resource migration between clusters
 export const migrateResources = async (
   sourceConfig: EKSClusterConfig,
   targetConfig: EKSClusterConfig,
@@ -171,25 +170,116 @@ export const migrateResources = async (
   try {
     // Step 1: Export resources from source cluster
     onProgress(1, `Exporting resources from ${sourceConfig.clusterName}`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
     
-    // Step 2: Transform manifests
-    onProgress(2, `Transforming resource manifests for compatibility`);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Convert selected resources to the format needed by the API
+    const resources = [
+      ...selectedPods.filter(pod => pod.selected).map(pod => ({
+        kind: 'Pod',
+        namespace: pod.namespace,
+        name: pod.name
+      })),
+      ...selectedPVs.filter(pv => pv.selected).map(pv => ({
+        kind: 'PersistentVolumeClaim',
+        namespace: 'default', // Assuming PVs are in default namespace
+        name: pv.name
+      }))
+    ];
     
-    // Step 3: Deploy to target cluster
-    onProgress(3, `Deploying resources to ${targetConfig.clusterName}`);
-    await new Promise(resolve => setTimeout(resolve, 2500));
-    
-    // Step 4: Handle persistent volumes with Velero (simulated)
-    if (selectedPVs.length > 0) {
-      onProgress(4, `Backing up and restoring persistent volumes with Velero`);
-      await new Promise(resolve => setTimeout(resolve, 3000));
+    if (resources.length === 0) {
+      throw new Error('No resources selected for migration');
     }
     
-    // Step 5: Verify deployment
-    onProgress(5, `Verifying successful migration`);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Set up migration options
+    const options = {
+      targetNamespace: 'default', // Default target namespace
+      targetStorageClass: null, // Keep existing storage class
+      // Add other options as needed
+    };
+    
+    // Initiate migration
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/k8s/migrate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sourceKubeconfig: sourceConfig.kubeconfig,
+        targetKubeconfig: targetConfig.kubeconfig,
+        resources,
+        options
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Migration request failed');
+    }
+    
+    const migrationResponse = await response.json();
+    const migrationId = migrationResponse.migrationId;
+    
+    // Poll migration status
+    let migrationComplete = false;
+    let currentStep = 1;
+    
+    while (!migrationComplete) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2 seconds
+      
+      const statusResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/k8s/migration/${migrationId}/status`);
+      
+      if (!statusResponse.ok) {
+        throw new Error('Failed to fetch migration status');
+      }
+      
+      const statusData = await statusResponse.json();
+      
+      // Update progress based on the status
+      switch (statusData.currentStep) {
+        case 'extracting':
+          if (currentStep < 2) {
+            currentStep = 2;
+            onProgress(2, `Transforming manifests for compatibility (${statusData.resourcesMigrated}/${statusData.resourcesTotal})`);
+          }
+          break;
+        case 'transforming':
+          if (currentStep < 3) {
+            currentStep = 3;
+            onProgress(3, `Deploying resources to ${targetConfig.clusterName} (${statusData.resourcesMigrated}/${statusData.resourcesTotal})`);
+          }
+          break;
+        case 'applying':
+          if (currentStep < 4) {
+            currentStep = 4;
+            onProgress(4, `Applying resources to target cluster (${statusData.resourcesMigrated}/${statusData.resourcesTotal})`);
+          }
+          break;
+        case 'verifying':
+          if (currentStep < 5) {
+            currentStep = 5;
+            onProgress(5, `Verifying successful migration (${statusData.resourcesMigrated}/${statusData.resourcesTotal})`);
+          }
+          break;
+        case 'completed':
+          migrationComplete = true;
+          onProgress(6, `Migration completed successfully! Migrated ${statusData.resourcesMigrated} resources.`);
+          break;
+        case 'failed':
+          throw new Error(`Migration failed: ${statusData.error || 'Unknown error'}`);
+      }
+      
+      // Calculate progress percentage for the UI
+      const progressPercentage = Math.floor((statusData.resourcesMigrated / statusData.resourcesTotal) * 100);
+      console.log(`Migration progress: ${progressPercentage}% (${statusData.resourcesMigrated}/${statusData.resourcesTotal})`);
+      
+      // Check if migration is complete
+      if (statusData.status === 'completed' || statusData.status === 'failed') {
+        migrationComplete = true;
+        
+        if (statusData.status === 'failed') {
+          throw new Error(`Migration failed: ${statusData.error || 'Unknown error'}`);
+        }
+      }
+    }
     
     return true;
   } catch (error) {

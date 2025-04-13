@@ -32,7 +32,13 @@ import {
   Edit3,
   Save,
   Copy,
-  User as UserIcon
+  User as UserIcon,
+  Cloud,
+  ShieldAlert,
+  Users,
+  LayoutGrid,
+  HardDrive,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -60,12 +66,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import MigrationService, { ResourceToMigrate } from '@/services/MigrationService';
+import TenantResources from '@/components/clusters/TenantResources';
+import { Separator } from '@/components/ui/separator';
 
 const ClusterDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [cluster, setCluster] = useState<Cluster | null>(null);
+  const [cluster, setCluster] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -146,6 +155,17 @@ const ClusterDetails = () => {
   const [metrics, setMetrics] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoadingMonitoring, setIsLoadingMonitoring] = useState(false);
+
+  // Migration state
+  const [selectedComponents, setSelectedComponents] = useState<{[key: string]: boolean}>({});
+  const [componentCounts, setComponentCounts] = useState<{[key: string]: number}>({});
+  const [isMigrationLoading, setIsMigrationLoading] = useState(false);
+  const [migrationYaml, setMigrationYaml] = useState<string>('');
+  const [isMigrationYamlOpen, setIsMigrationYamlOpen] = useState(false);
+  const [resourceType, setResourceType] = useState<string>('deployments');
+  const [targetCluster, setTargetCluster] = useState<any>(null);
+  const [availableTargetClusters, setAvailableTargetClusters] = useState<any[]>([]);
+  const [isLoadingTargetClusters, setIsLoadingTargetClusters] = useState(false);
 
   // Function to fetch namespaces
   const fetchNamespaces = async (kubeconfig: string) => {
@@ -1417,6 +1437,151 @@ const ClusterDetails = () => {
     }
   };
 
+  // Handle component selection for migration
+  const toggleComponentSelection = (kind: string, namespace: string, name: string) => {
+    const componentKey = `${kind}|${namespace}|${name}`;
+    setSelectedComponents(prev => ({
+      ...prev,
+      [componentKey]: !prev[componentKey]
+    }));
+  };
+
+  // Function to count selected components by type
+  const countSelectedComponents = () => {
+    const counts: {[key: string]: number} = {};
+    
+    Object.keys(selectedComponents).forEach(key => {
+      if (selectedComponents[key]) {
+        const kind = key.split('|')[0];
+        counts[kind] = (counts[kind] || 0) + 1;
+      }
+    });
+    
+    setComponentCounts(counts);
+  };
+
+  // Effect to update component counts when selection changes
+  useEffect(() => {
+    countSelectedComponents();
+  }, [selectedComponents]);
+
+  // Function to generate YAML for selected components
+  const handleGenerateYaml = async () => {
+    if (Object.keys(selectedComponents).filter(key => selectedComponents[key]).length === 0) {
+      toast.error('No components selected for migration');
+      return;
+    }
+
+    setIsMigrationLoading(true);
+    
+    try {
+      // Get selected components
+      const selectedItems: ResourceToMigrate[] = Object.keys(selectedComponents)
+        .filter(key => selectedComponents[key])
+        .map(key => {
+          const [kind, namespace, name] = key.split('|');
+          return { kind, namespace, name };
+        });
+
+      // Use the MigrationService to generate actual YAML
+      const generatedYaml = await MigrationService.generateYaml(
+        cluster.kubeconfig,
+        selectedItems
+      );
+      
+      setMigrationYaml(generatedYaml);
+      setIsMigrationYamlOpen(true);
+      toast.success('YAML generated for selected components');
+    } catch (error) {
+      console.error('Error generating migration YAML:', error);
+      toast.error('Failed to generate migration YAML');
+    } finally {
+      setIsMigrationLoading(false);
+    }
+  };
+
+  // Function to handle direct migration of selected components
+  const handleDirectMigrate = async () => {
+    if (Object.keys(selectedComponents).filter(key => selectedComponents[key]).length === 0) {
+      toast.error('No components selected for migration');
+      return;
+    }
+
+    if (!targetCluster || !targetCluster.kubeconfig) {
+      toast.error('Please select a target cluster with valid kubeconfig');
+      return;
+    }
+
+    setIsMigrationLoading(true);
+    
+    try {
+      // Get selected components
+      const selectedItems: ResourceToMigrate[] = Object.keys(selectedComponents)
+        .filter(key => selectedComponents[key])
+        .map(key => {
+          const [kind, namespace, name] = key.split('|');
+          return { kind, namespace, name };
+        });
+
+      // Set migration options
+      const migrationOptions = {
+        targetNamespace: selectedNamespace || 'default',
+        preserveNodeAffinity: false
+      };
+
+      // Initiate migration
+      const migrationId = await MigrationService.migrateResources(
+        cluster.kubeconfig,
+        targetCluster.kubeconfig,
+        selectedItems,
+        migrationOptions
+      );
+      
+      toast.success(`Migration initiated! Track status with ID: ${migrationId}`);
+      
+      // Redirect to migration status page or dashboard with success message
+      navigate(`/dashboard?migration=${migrationId}`);
+      
+    } catch (error) {
+      console.error('Error initiating migration:', error);
+      toast.error(`Failed to initiate migration: ${(error as Error).message}`);
+    } finally {
+      setIsMigrationLoading(false);
+    }
+  };
+
+  // Fetch available target clusters for direct migration
+  useEffect(() => {
+    const fetchTargetClusters = async () => {
+      if (!user) return;
+      
+      setIsLoadingTargetClusters(true);
+      try {
+        // Fetch clusters suitable as migration targets (multi-tenant clusters)
+        const clusters = await clusterService.getAllClusters(user.id);
+        // Filter for multi-tenant clusters or other valid targets
+        const validTargets = clusters.filter(c => 
+          c.type === 'tenant' && c.id !== cluster?.id
+        );
+        
+        setAvailableTargetClusters(validTargets);
+        // Pre-select the first valid target if available
+        if (validTargets.length > 0 && !targetCluster) {
+          setTargetCluster(validTargets[0]);
+        }
+      } catch (error) {
+        console.error('Error fetching target clusters:', error);
+        toast.error('Failed to load target clusters');
+      } finally {
+        setIsLoadingTargetClusters(false);
+      }
+    };
+    
+    if (cluster && activeTab === 'migration') {
+      fetchTargetClusters();
+    }
+  }, [user, cluster, activeTab]);
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -1716,6 +1881,10 @@ const ClusterDetails = () => {
                               <TabsTrigger value="storage" className="font-medium">Storage</TabsTrigger>
                               <TabsTrigger value="clusterinfo" className="font-medium">Cluster Info</TabsTrigger>
                               <TabsTrigger value="monitoring" className="font-medium">Monitoring</TabsTrigger>
+                              <TabsTrigger value="migration" className="font-medium">Migration</TabsTrigger>
+                              {cluster?.type === 'tenant' && (
+                                <TabsTrigger value="tenant" className="font-medium">Tenant</TabsTrigger>
+                              )}
                             </TabsList>
                             
                             <TabsContent value="nodes">
@@ -2615,6 +2784,288 @@ const ClusterDetails = () => {
                                 </div>
                               </div>
                             </TabsContent>
+                            <TabsContent value="migration" className="pt-4">
+                              <div className="mb-4 bg-indigo-50 dark:bg-indigo-950/20 p-3 rounded-md border border-indigo-100 dark:border-indigo-900/40">
+                                <h3 className="text-sm font-medium text-indigo-800 dark:text-indigo-300 flex items-center mb-1">
+                                  <Globe className="h-4 w-4 mr-2" /> Component Migration
+                                </h3>
+                                <p className="text-xs text-indigo-600 dark:text-indigo-400">
+                                  Select components from this cluster to migrate to a multi-tenant cluster.
+                                </p>
+                              </div>
+
+                              <div className="flex justify-between items-center mb-4">
+                                <div className="flex gap-3">
+                                  <select
+                                    className="border rounded px-3 py-1 text-sm"
+                                    value={resourceType}
+                                    onChange={(e) => setResourceType(e.target.value)}
+                                  >
+                                    <option value="deployments">Deployments</option>
+                                    <option value="statefulsets">StatefulSets</option>
+                                    <option value="daemonsets">DaemonSets</option>
+                                    <option value="services">Services</option>
+                                    <option value="configmaps">ConfigMaps</option>
+                                    <option value="secrets">Secrets</option>
+                                  </select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-xs text-gray-500 flex items-center">
+                                    <div className="flex items-center gap-1 mr-3">
+                                      {Object.keys(componentCounts).length > 0 ? (
+                                        Object.entries(componentCounts).map(([kind, count]) => (
+                                          <Badge key={kind} variant="outline" className="bg-indigo-50 text-indigo-700">
+                                            {kind}: {count}
+                                          </Badge>
+                                        ))
+                                      ) : (
+                                        <span>No components selected</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <select
+                                      className="border rounded px-3 py-1 text-sm"
+                                      value={targetCluster?.id || ''}
+                                      onChange={(e) => {
+                                        const selected = availableTargetClusters.find(c => c.id === e.target.value);
+                                        setTargetCluster(selected || null);
+                                      }}
+                                      disabled={isLoadingTargetClusters || availableTargetClusters.length === 0}
+                                    >
+                                      {isLoadingTargetClusters ? (
+                                        <option>Loading target clusters...</option>
+                                      ) : availableTargetClusters.length === 0 ? (
+                                        <option>No target clusters available</option>
+                                      ) : (
+                                        availableTargetClusters.map(c => (
+                                          <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))
+                                      )}
+                                    </select>
+                                    
+                                    <Button
+                                      size="sm"
+                                      className="flex items-center"
+                                      onClick={handleDirectMigrate}
+                                      disabled={
+                                        isMigrationLoading || 
+                                        Object.keys(selectedComponents).filter(key => selectedComponents[key]).length === 0 ||
+                                        !targetCluster
+                                      }
+                                    >
+                                      {isMigrationLoading ? (
+                                        <>
+                                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Migrating...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Cloud className="h-4 w-4 mr-2" /> Migrate Now
+                                        </>
+                                      )}
+                                    </Button>
+                                    
+                                    <Button
+                                      size="sm"
+                                      className="flex items-center"
+                                      onClick={handleGenerateYaml}
+                                      disabled={isMigrationLoading || Object.keys(selectedComponents).filter(key => selectedComponents[key]).length === 0}
+                                    >
+                                      {isMigrationLoading ? (
+                                        <>
+                                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <DownloadCloud className="h-4 w-4 mr-2" /> Generate YAML
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="bg-white rounded-md border shadow-sm">
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                      <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                                          Select
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                          Name
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                          Namespace
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                          {resourceType === 'deployments' ? 'Replicas' : 
+                                           resourceType === 'statefulsets' ? 'Replicas' :
+                                           resourceType === 'daemonsets' ? 'Nodes' :
+                                           resourceType === 'services' ? 'Type' :
+                                           resourceType === 'configmaps' ? 'Data Items' :
+                                           resourceType === 'secrets' ? 'Type' : 'Status'}
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                          Age
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                      {resourceType === 'deployments' && deployments.map((deployment: any) => (
+                                        <tr key={`${deployment.namespace}-${deployment.name}`} className="hover:bg-gray-50">
+                                          <td className="px-6 py-4 whitespace-nowrap">
+                                            <Checkbox 
+                                              checked={!!selectedComponents[`Deployment|${deployment.namespace}|${deployment.name}`]} 
+                                              onCheckedChange={() => toggleComponentSelection('Deployment', deployment.namespace, deployment.name)}
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{deployment.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {deployment.replicas.current}/{deployment.replicas.desired}
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.age}</td>
+                                        </tr>
+                                      ))}
+                                      {resourceType === 'statefulsets' && statefulSets.map((sts: any) => (
+                                        <tr key={`${sts.namespace}-${sts.name}`} className="hover:bg-gray-50">
+                                          <td className="px-6 py-4 whitespace-nowrap">
+                                            <Checkbox 
+                                              checked={!!selectedComponents[`StatefulSet|${sts.namespace}|${sts.name}`]} 
+                                              onCheckedChange={() => toggleComponentSelection('StatefulSet', sts.namespace, sts.name)}
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sts.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {sts.replicas.current}/{sts.replicas.desired}
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.age}</td>
+                                        </tr>
+                                      ))}
+                                      {resourceType === 'daemonsets' && daemonSets.map((ds: any) => (
+                                        <tr key={`${ds.namespace}-${ds.name}`} className="hover:bg-gray-50">
+                                          <td className="px-6 py-4 whitespace-nowrap">
+                                            <Checkbox 
+                                              checked={!!selectedComponents[`DaemonSet|${ds.namespace}|${ds.name}`]} 
+                                              onCheckedChange={() => toggleComponentSelection('DaemonSet', ds.namespace, ds.name)}
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ds.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {ds.desiredNumberScheduled}
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.age}</td>
+                                        </tr>
+                                      ))}
+                                      {resourceType === 'services' && services.map((svc: any) => (
+                                        <tr key={`${svc.namespace}-${svc.name}`} className="hover:bg-gray-50">
+                                          <td className="px-6 py-4 whitespace-nowrap">
+                                            <Checkbox 
+                                              checked={!!selectedComponents[`Service|${svc.namespace}|${svc.name}`]} 
+                                              onCheckedChange={() => toggleComponentSelection('Service', svc.namespace, svc.name)}
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{svc.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <Badge className={
+                                              svc.type === 'LoadBalancer' ? 'bg-blue-100 text-blue-800' :
+                                              svc.type === 'NodePort' ? 'bg-purple-100 text-purple-800' :
+                                              svc.type === 'ExternalName' ? 'bg-yellow-100 text-yellow-800' :
+                                              'bg-gray-100 text-gray-800'
+                                            }>
+                                              {svc.type}
+                                            </Badge>
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.age}</td>
+                                        </tr>
+                                      ))}
+                                      {resourceType === 'configmaps' && configMaps.map((cm: any) => (
+                                        <tr key={`${cm.namespace}-${cm.name}`} className="hover:bg-gray-50">
+                                          <td className="px-6 py-4 whitespace-nowrap">
+                                            <Checkbox 
+                                              checked={!!selectedComponents[`ConfigMap|${cm.namespace}|${cm.name}`]} 
+                                              onCheckedChange={() => toggleComponentSelection('ConfigMap', cm.namespace, cm.name)}
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cm.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cm.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cm.dataCount || 0}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cm.age}</td>
+                                        </tr>
+                                      ))}
+                                      {resourceType === 'secrets' && secrets.map((secret: any) => (
+                                        <tr key={`${secret.namespace}-${secret.name}`} className="hover:bg-gray-50">
+                                          <td className="px-6 py-4 whitespace-nowrap">
+                                            <Checkbox 
+                                              checked={!!selectedComponents[`Secret|${secret.namespace}|${secret.name}`]} 
+                                              onCheckedChange={() => toggleComponentSelection('Secret', secret.namespace, secret.name)}
+                                            />
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{secret.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.type}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.age}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* YAML Preview Dialog */}
+                              <Dialog open={isMigrationYamlOpen} onOpenChange={setIsMigrationYamlOpen}>
+                                <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+                                  <DialogHeader>
+                                    <DialogTitle>Generated YAML for Migration</DialogTitle>
+                                    <DialogDescription>
+                                      This YAML represents the selected components that will be migrated.
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <div className="flex-1 overflow-auto">
+                                    <ScrollArea className="h-[50vh]">
+                                      <pre className="text-xs bg-gray-50 p-4 rounded font-mono overflow-x-auto whitespace-pre-wrap">
+                                        {migrationYaml}
+                                      </pre>
+                                    </ScrollArea>
+                                  </div>
+                                  <DialogFooter className="flex justify-between items-center mt-4">
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => {
+                                        // In a real implementation, this would copy to clipboard
+                                        navigator.clipboard.writeText(migrationYaml);
+                                        toast.success('YAML copied to clipboard');
+                                      }}
+                                    >
+                                      <Copy className="h-4 w-4 mr-2" /> Copy to Clipboard
+                                    </Button>
+                                    <Button
+                                      onClick={() => setIsMigrationYamlOpen(false)}
+                                    >
+                                      Close
+                                    </Button>
+                                  </DialogFooter>
+                                </DialogContent>
+                              </Dialog>
+                            </TabsContent>
+                            {cluster?.type === 'tenant' && (
+                              <TabsContent value="tenant" className="pt-4">
+                                <div className="mb-4 bg-purple-50 dark:bg-purple-950/20 p-3 rounded-md border border-purple-100 dark:border-purple-900/40">
+                                  <h3 className="text-sm font-medium text-purple-800 dark:text-purple-300 flex items-center mb-1">
+                                    <Users className="h-4 w-4 mr-2" /> Multi-Tenant Resources
+                                  </h3>
+                                  <p className="text-xs text-purple-600 dark:text-purple-400">
+                                    View and manage resources across all tenant namespaces in this multi-tenant cluster.
+                                  </p>
+                                </div>
+                                <TenantResources cluster={cluster} />
+                              </TabsContent>
+                            )}
                           </Tabs>
                         </div>
                       ) : (
