@@ -948,40 +948,10 @@ const MigrationWizard = () => {
                 <div className="bg-green-50 dark:bg-green-950/30 p-4 rounded-md">
                   <h4 className="font-medium text-green-800 dark:text-green-300 mb-2">Migration Summary</h4>
                   <ul className="space-y-2 text-sm text-green-700 dark:text-green-300">
-                    {migratedResources.namespaces > 0 && (
+                    {migrationProgress.message && (
                       <li className="flex items-center">
                         <Check className="h-4 w-4 mr-2" />
-                        Migrated {migratedResources.namespaces} namespace{migratedResources.namespaces !== 1 ? 's' : ''}
-                      </li>
-                    )}
-                    {migratedResources.pods > 0 && (
-                      <li className="flex items-center">
-                        <Check className="h-4 w-4 mr-2" />
-                        Migrated {migratedResources.pods} pod{migratedResources.pods !== 1 ? 's' : ''}
-                      </li>
-                    )}
-                    {migratedResources.persistentVolumes > 0 && (
-                      <li className="flex items-center">
-                        <Check className="h-4 w-4 mr-2" />
-                        Migrated {migratedResources.persistentVolumes} persistent volume{migratedResources.persistentVolumes !== 1 ? 's' : ''}
-                      </li>
-                    )}
-                    {migratedResources.services > 0 && (
-                      <li className="flex items-center">
-                        <Check className="h-4 w-4 mr-2" />
-                        Migrated {migratedResources.services} service{migratedResources.services !== 1 ? 's' : ''}
-                      </li>
-                    )}
-                    {migratedResources.configMaps > 0 && (
-                      <li className="flex items-center">
-                        <Check className="h-4 w-4 mr-2" />
-                        Migrated {migratedResources.configMaps} config map{migratedResources.configMaps !== 1 ? 's' : ''}
-                      </li>
-                    )}
-                    {migratedResources.secrets > 0 && (
-                      <li className="flex items-center">
-                        <Check className="h-4 w-4 mr-2" />
-                        Migrated {migratedResources.secrets} secret{migratedResources.secrets !== 1 ? 's' : ''}
+                        {migrationProgress.message}
                       </li>
                     )}
                     <li className="flex items-center">
@@ -992,7 +962,7 @@ const MigrationWizard = () => {
                       <Check className="h-4 w-4 mr-2" />
                       Created new kubeconfig for multi-tenant setup
                     </li>
-                    {status === 'completed' && Object.values(migratedResources).every(count => count === 0) && (
+                    {status === 'completed' && migrationProgress.step === 5 && !migrationProgress.message.includes('resources migrated') && (
                       <li className="flex items-center text-yellow-600 dark:text-yellow-400">
                         <AlertCircle className="h-4 w-4 mr-2" />
                         No resources were migrated. Please check your resource selection.
