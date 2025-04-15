@@ -551,10 +551,16 @@ const MigrationWizard = () => {
           if (migrationStatus.status === 'completed') {
             // Track successfully migrated resources by type
             const migratedResourceCounts = migrationStatus.migratedResources || {};
+            
+            // Calculate total migrated resources from the status
+            const totalMigrated = migrationStatus.resourcesMigrated || 0;
+            
+            // If we have specific resource counts, use them
+            // Otherwise, infer from the total based on resource types
             setMigratedResources({
               pods: migratedResourceCounts.Pod || 0,
               persistentVolumes: migratedResourceCounts.PersistentVolume || 0,
-              namespaces: migratedResourceCounts.Namespace || 0,
+              namespaces: migratedResourceCounts.Namespace || (migrationStatus.currentStep.includes('Namespace') ? totalMigrated : 0),
               nodes: migratedResourceCounts.Node || 0,
               services: migratedResourceCounts.Service || 0,
               configMaps: migratedResourceCounts.ConfigMap || 0,
@@ -986,7 +992,7 @@ const MigrationWizard = () => {
                       <Check className="h-4 w-4 mr-2" />
                       Created new kubeconfig for multi-tenant setup
                     </li>
-                    {Object.values(migratedResources).every(count => count === 0) && (
+                    {status === 'completed' && Object.values(migratedResources).every(count => count === 0) && (
                       <li className="flex items-center text-yellow-600 dark:text-yellow-400">
                         <AlertCircle className="h-4 w-4 mr-2" />
                         No resources were migrated. Please check your resource selection.
