@@ -324,9 +324,8 @@ const MigrationPanel: React.FC<MigrationPanelProps> = ({ cluster, resources }) =
                     <ListItem 
                       key={`${resource.kind}-${resource.namespace}-${resource.name}-${idx}`}
                       dense
-                      button
                       onClick={() => handleResourceToggle(resource)}
-                      sx={{ pl: 4 }}
+                      sx={{ pl: 4, cursor: 'pointer' }}
                     >
                       <Checkbox
                         edge="start"
