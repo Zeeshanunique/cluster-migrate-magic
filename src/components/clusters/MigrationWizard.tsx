@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Check, 
@@ -137,6 +137,9 @@ const MigrationWizard = () => {
 
   // Migration progress state
   const [migrationProgress, setMigrationProgress] = useState({ step: 0, message: '' });
+
+  // Add polling cleanup reference with useRef
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load available clusters on component mount
   useEffect(() => {
@@ -363,8 +366,6 @@ const MigrationWizard = () => {
     }
   };
 
-  // No replacement needed - removing duplicate function
-
   // Handle select all functionality for any resource type
   const handleSelectAll = (resourceType: string, selectAll: boolean) => {
     console.log(`Select all for ${resourceType}: ${selectAll}`);
@@ -412,9 +413,9 @@ const MigrationWizard = () => {
       const compatibilityResult = await checkClusterCompatibility(sourceConfig, targetConfig);
       setCompatibility(compatibilityResult);
       
-      // Move to next step
-      setCurrentStep(currentStep + 1);
-      setProgress(((currentStep + 2) / steps.length) * 100);
+      // Move to next step with consistent progress calculation
+      setCurrentStep(2);
+      setProgress((3 / steps.length) * 100);
       setStatus('idle');
     } catch (error) {
       console.error("Compatibility check failed:", error);
@@ -425,10 +426,22 @@ const MigrationWizard = () => {
     }
   };
 
+  // Add effect to clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      // Cleanup polling if component unmounts during migration
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        console.log('Cleaned up migration polling on unmount');
+      }
+    };
+  }, []);
+
   // Handle migration execution
   const handleStartMigration = async () => {
     try {
       setStatus('running');
+      setProgress((3 / steps.length) * 100);
       
       // Filter only selected resources for all resource types
       const selectedNamespacesToMigrate = namespaces.filter(ns => ns.selected);
@@ -450,7 +463,7 @@ const MigrationWizard = () => {
         return;
       }
       
-      // Convert to resource format expected by the API
+      // Convert to resource format expected by the API - FIX RESOURCE TYPE MAPPING
       const resources = [
         // Include namespaces
         ...selectedNamespacesToMigrate.map(ns => ({
@@ -458,22 +471,22 @@ const MigrationWizard = () => {
           namespace: '',  // Namespaces don't have a parent namespace
           name: ns.name
         })),
-        // Include nodes
+        // Include nodes - nodes are cluster-scoped resources
         ...selectedNodesToMigrate.map(node => ({
           kind: 'Node',
           namespace: '',  // Nodes are cluster-level resources
           name: node.name
         })),
-        // Include pods
+        // Include pods - pods are namespaced resources
         ...selectedPodsToMigrate.map(pod => ({
           kind: 'Pod',
           namespace: pod.namespace || 'default',
           name: pod.name
         })),
-        // Include persistent volumes
+        // Include persistent volumes - FIX: Use correct resource type and remove namespace
         ...selectedPVsToMigrate.map(pv => ({
-          kind: 'PersistentVolumeClaim',
-          namespace: 'default', // Assuming PVs are in default namespace
+          kind: 'PersistentVolume', // FIXED: Was incorrectly set to 'PersistentVolumeClaim'
+          namespace: '', // FIXED: PVs are cluster-scoped resources, not namespaced
           name: pv.name
         }))
       ];
@@ -492,21 +505,6 @@ const MigrationWizard = () => {
         resources,
         migrationOptions
       );
-      
-      // Set up a polling mechanism to track real migration progress
-      let attempts = 0;
-      const maxAttempts = 30; // Maximum polling attempts (5 minutes @ 10 second intervals)
-      const pollInterval = 5000; // Poll every 5 seconds
-      
-      // Set timeout to ensure we don't get stuck in case of server issues
-      const timeoutId = setTimeout(() => {
-        if (status === 'running') {
-          console.error(`Migration ${migrationId} timed out`);
-          setStatus('error');
-          setError('Migration timed out. Please check cluster status manually.');
-          toast.error('Migration timed out');
-        }
-      }, 10 * 60 * 1000); // 10 minute maximum timeout
       
       // Update UI right away to show initial progress
       setMigrationProgress({
@@ -535,16 +533,10 @@ const MigrationWizard = () => {
       
       // Define a function to poll migration status
       const pollMigrationStatus = async () => {
-        if (attempts >= maxAttempts || status !== 'running') {
-          clearTimeout(timeoutId);
-          return;
-        }
-        
-        attempts++;
         try {
           // Get real migration status from the server
           const migrationStatus = await MigrationService.getMigrationStatus(migrationId);
-          console.log(`Migration status update (attempt ${attempts}):`, migrationStatus);
+          console.log(`Migration status update:`, migrationStatus);
           
           // Update the UI based on real status
           if (migrationStatus.status === 'completed') {
@@ -555,14 +547,14 @@ const MigrationWizard = () => {
               message: `Migration completed successfully: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources migrated`
             });
             toast.success(`Migration completed successfully!`);
-            clearTimeout(timeoutId);
-            setCurrentStep(3); // Move to the completion step
+            
+            // IMPROVED: Automatically advance to verification step upon completion
+            setCurrentStep(4);
             return;
           } else if (migrationStatus.status === 'failed') {
             setStatus('error');
             setError(migrationStatus.error || 'Migration failed with an unknown error');
             toast.error(`Migration failed: ${migrationStatus.error || 'Unknown error'}`);
-            clearTimeout(timeoutId);
             return;
           } else {
             // Still running, update progress
@@ -573,20 +565,24 @@ const MigrationWizard = () => {
               step: stepNumber,
               message: `${migrationStatus.currentStep}: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources`
             });
-            setProgress(progressPercent);
+            
+            // Update main progress bar based on both step and resource completion
+            const stepProgress = ((3 + (stepNumber / 5)) / steps.length) * 100;
+            const combinedProgress = Math.max(stepProgress, (3 / steps.length) * 100 + progressPercent * (1 / steps.length));
+            setProgress(Math.min(combinedProgress, 80)); // Cap at 80% until fully complete
             
             // Continue polling
-            setTimeout(pollMigrationStatus, pollInterval);
+            pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
           }
         } catch (error) {
-          console.error(`Error polling migration status (attempt ${attempts}):`, error);
-          // Continue polling despite errors, up to max attempts
-          setTimeout(pollMigrationStatus, pollInterval);
+          console.error(`Error polling migration status:`, error);
+          // Continue polling despite errors
+          pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
         }
       };
       
       // Start polling
-      setTimeout(pollMigrationStatus, pollInterval);
+      pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
       
     } catch (error) {
       console.error('Migration failed:', error);
@@ -596,20 +592,6 @@ const MigrationWizard = () => {
     }
   };
 
-  // Helper function to convert status string to step number
-  const getStepNumberFromStatus = (status: string): number => {
-    const statusMap: { [key: string]: number } = {
-      'initializing': 1,
-      'extracting': 2,
-      'transforming': 3,
-      'applying': 4,
-      'verifying': 5,
-      'completed': 6
-    };
-    
-    return statusMap[status] || 1;
-  };
-
   // Reset migration process
   const resetMigration = () => {
     // Reset all state variables
@@ -617,14 +599,36 @@ const MigrationWizard = () => {
     setProgress(0);
     setStatus('idle');
     setError(null);
+    
+    // IMPROVED: Also reset cluster selections and configs
     setSourceConnected(false);
     setTargetConnected(false);
+    setSourceCluster(null);
+    setTargetCluster(null);
+    setSourceConfig({
+      clusterName: '',
+      region: 'us-east-1',
+      useIAMRole: false,
+    });
+    setTargetConfig({
+      clusterName: '',
+      region: 'us-east-1',
+      useIAMRole: false,
+    });
+    
+    // Reset resource selections
     setNamespaces([]);
     setNodes([]);
     setPods([]);
     setPersistentVolumes([]);
     setCompatibility({ compatible: false, issues: [] });
     setMigrationProgress({ step: 0, message: '' });
+    
+    // Clear any polling timeout
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
   };
   
   // Finish migration and navigate back to dashboard
@@ -991,7 +995,7 @@ const MigrationWizard = () => {
               variant="outline"
               onClick={() => {
               setCurrentStep(0);
-                setProgress(0);
+                setProgress((1 / steps.length) * 100);
               }}
             >
               Back
@@ -1026,7 +1030,7 @@ const MigrationWizard = () => {
               variant="outline"
               onClick={() => {
               setCurrentStep(1);
-                setProgress(((currentStep) / steps.length) * 100);
+                setProgress((2 / steps.length) * 100);
               }}
             >
               Back
@@ -1068,21 +1072,20 @@ const MigrationWizard = () => {
               </>
             ) : status === 'completed' ? (
               <Button
-                onClick={() => {
-                  setCurrentStep(4);
-                  setProgress(100);
-                }}
+                variant="outline"
+                disabled
               >
-                Continue <ChevronRight className="ml-2 h-4 w-4" />
-            </Button>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Completing...
+              </Button>
             ) : (
               <Button
                 variant="outline"
                 disabled
               >
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Migrating...
-            </Button>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Migrating...
+              </Button>
             )}
           </>
         );
