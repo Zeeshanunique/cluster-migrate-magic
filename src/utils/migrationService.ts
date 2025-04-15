@@ -18,11 +18,21 @@ export interface MigrationOptions {
 
 export interface MigrationStatus {
   id: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed';
   currentStep: string;
   resourcesMigrated: number;
   resourcesTotal: number;
   error?: string;
+  migratedResources?: {
+    Pod?: number;
+    PersistentVolume?: number;
+    Namespace?: number;
+    Node?: number;
+    Service?: number;
+    ConfigMap?: number;
+    Secret?: number;
+    [key: string]: number | undefined;
+  };
 }
 
 const MigrationService = {

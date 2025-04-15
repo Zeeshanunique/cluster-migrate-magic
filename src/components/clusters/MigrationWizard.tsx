@@ -141,6 +141,17 @@ const MigrationWizard = () => {
   // Add polling cleanup reference with useRef
   const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Add new state for tracking migrated resources
+  const [migratedResources, setMigratedResources] = useState({
+    pods: 0,
+    persistentVolumes: 0,
+    namespaces: 0,
+    nodes: 0,
+    services: 0,
+    configMaps: 0,
+    secrets: 0
+  });
+
   // Load available clusters on component mount
   useEffect(() => {
     const loadClusters = async () => {
@@ -534,12 +545,22 @@ const MigrationWizard = () => {
       // Define a function to poll migration status
       const pollMigrationStatus = async () => {
         try {
-          // Get real migration status from the server
           const migrationStatus = await MigrationService.getMigrationStatus(migrationId);
           console.log(`Migration status update:`, migrationStatus);
           
-          // Update the UI based on real status
           if (migrationStatus.status === 'completed') {
+            // Track successfully migrated resources by type
+            const migratedResourceCounts = migrationStatus.migratedResources || {};
+            setMigratedResources({
+              pods: migratedResourceCounts.Pod || 0,
+              persistentVolumes: migratedResourceCounts.PersistentVolume || 0,
+              namespaces: migratedResourceCounts.Namespace || 0,
+              nodes: migratedResourceCounts.Node || 0,
+              services: migratedResourceCounts.Service || 0,
+              configMaps: migratedResourceCounts.ConfigMap || 0,
+              secrets: migratedResourceCounts.Secret || 0
+            });
+            
             setStatus('completed');
             setProgress(100);
             setMigrationProgress({
@@ -547,8 +568,6 @@ const MigrationWizard = () => {
               message: `Migration completed successfully: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources migrated`
             });
             toast.success(`Migration completed successfully!`);
-            
-            // IMPROVED: Automatically advance to verification step upon completion
             setCurrentStep(4);
             return;
           } else if (migrationStatus.status === 'failed') {
@@ -576,7 +595,6 @@ const MigrationWizard = () => {
           }
         } catch (error) {
           console.error(`Error polling migration status:`, error);
-          // Continue polling despite errors
           pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
         }
       };
@@ -918,20 +936,48 @@ const MigrationWizard = () => {
                   <p className="text-muted-foreground text-center max-w-md mt-2">
                     {sourceConfig.clusterName} has been successfully migrated to a multi-tenant setup
                     with {targetConfig.clusterName}.
-              </p>
-            </div>
-            
+                  </p>
+                </div>
+                
                 <div className="bg-green-50 dark:bg-green-950/30 p-4 rounded-md">
-                  <h4 className="font-medium text-green-800 dark:text-green-300 mb-2">Summary</h4>
+                  <h4 className="font-medium text-green-800 dark:text-green-300 mb-2">Migration Summary</h4>
                   <ul className="space-y-2 text-sm text-green-700 dark:text-green-300">
-                    <li className="flex items-center">
-                      <Check className="h-4 w-4 mr-2" />
-                      Migrated {pods.filter(p => p.selected).length} pods
-                    </li>
-                    <li className="flex items-center">
-                      <Check className="h-4 w-4 mr-2" />
-                      Migrated {persistentVolumes.filter(pv => pv.selected).length} persistent volumes
-                    </li>
+                    {migratedResources.namespaces > 0 && (
+                      <li className="flex items-center">
+                        <Check className="h-4 w-4 mr-2" />
+                        Migrated {migratedResources.namespaces} namespace{migratedResources.namespaces !== 1 ? 's' : ''}
+                      </li>
+                    )}
+                    {migratedResources.pods > 0 && (
+                      <li className="flex items-center">
+                        <Check className="h-4 w-4 mr-2" />
+                        Migrated {migratedResources.pods} pod{migratedResources.pods !== 1 ? 's' : ''}
+                      </li>
+                    )}
+                    {migratedResources.persistentVolumes > 0 && (
+                      <li className="flex items-center">
+                        <Check className="h-4 w-4 mr-2" />
+                        Migrated {migratedResources.persistentVolumes} persistent volume{migratedResources.persistentVolumes !== 1 ? 's' : ''}
+                      </li>
+                    )}
+                    {migratedResources.services > 0 && (
+                      <li className="flex items-center">
+                        <Check className="h-4 w-4 mr-2" />
+                        Migrated {migratedResources.services} service{migratedResources.services !== 1 ? 's' : ''}
+                      </li>
+                    )}
+                    {migratedResources.configMaps > 0 && (
+                      <li className="flex items-center">
+                        <Check className="h-4 w-4 mr-2" />
+                        Migrated {migratedResources.configMaps} config map{migratedResources.configMaps !== 1 ? 's' : ''}
+                      </li>
+                    )}
+                    {migratedResources.secrets > 0 && (
+                      <li className="flex items-center">
+                        <Check className="h-4 w-4 mr-2" />
+                        Migrated {migratedResources.secrets} secret{migratedResources.secrets !== 1 ? 's' : ''}
+                      </li>
+                    )}
                     <li className="flex items-center">
                       <Check className="h-4 w-4 mr-2" />
                       Updated cluster type from single to multi-tenant
@@ -940,8 +986,14 @@ const MigrationWizard = () => {
                       <Check className="h-4 w-4 mr-2" />
                       Created new kubeconfig for multi-tenant setup
                     </li>
-              </ul>
-            </div>
+                    {Object.values(migratedResources).every(count => count === 0) && (
+                      <li className="flex items-center text-yellow-600 dark:text-yellow-400">
+                        <AlertCircle className="h-4 w-4 mr-2" />
+                        No resources were migrated. Please check your resource selection.
+                      </li>
+                    )}
+                  </ul>
+                </div>
               </CardContent>
             </Card>
           </div>
