@@ -78,12 +78,24 @@ const port = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://127.0.0.1:8080'],
+  origin: process.env.NODE_ENV === 'production' 
+    ? [process.env.ALLOWED_ORIGIN || '*'] // In production, use environment variable or allow all origins
+    : ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://localhost:5173'], // In development
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
+
+// Redirect legacy API endpoints to the new kube-migrate endpoints
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/')) {
+    const newUrl = req.url.replace('/api/', '/kube-migrate/');
+    console.log(`Redirecting legacy API path ${req.url} to ${newUrl}`);
+    req.url = newUrl;
+  }
+  next();
+});
 
 // Helper to extract token from kubeconfig
 function extractK8sAuthToken(kubeconfig) {
@@ -439,7 +451,7 @@ function generateSimulatedPods(nodeData, namespace = null) {
 }
 
 // Check token endpoint - useful for debugging
-app.post('/api/debug/token', (req, res) => {
+app.post('/kube-migrate/debug/token', (req, res) => {
   try {
     const { kubeconfig } = req.body;
     
@@ -495,7 +507,7 @@ app.post('/api/debug/token', (req, res) => {
 });
 
 // Add a token validation endpoint to help debug authentication issues
-app.post('/api/debug/validate-token', async (req, res) => {
+app.post('/kube-migrate/debug/validate-token', async (req, res) => {
   try {
     const { kubeconfig } = req.body;
     
@@ -595,28 +607,28 @@ app.post('/api/debug/validate-token', async (req, res) => {
 
 // Kubernetes API proxy endpoints for specific resources - both standard API paths and simplified paths
 // Standard Kubernetes API paths (for aws.ts after our update)
-app.post('/api/k8s/api/v1/nodes', async (req, res) => {
+app.post('/kube-migrate/k8s/api/v1/nodes', async (req, res) => {
   handleK8sApiRequest(req, res, '/api/v1/nodes');
 });
 
-app.post('/api/k8s/api/v1/pods', async (req, res) => {
+app.post('/kube-migrate/k8s/api/v1/pods', async (req, res) => {
   handleK8sApiRequest(req, res, '/api/v1/pods');
 });
 
-app.post('/api/k8s/api/v1/persistentvolumes', async (req, res) => {
+app.post('/kube-migrate/k8s/api/v1/persistentvolumes', async (req, res) => {
   handleK8sApiRequest(req, res, '/api/v1/persistentvolumes');
 });
 
 // Original simplified paths (for existing frontend code in kubernetes.ts, ClusterDetails.tsx)
-app.post('/api/k8s/nodes', async (req, res) => {
+app.post('/kube-migrate/k8s/nodes', async (req, res) => {
   handleK8sApiRequest(req, res, '/api/v1/nodes');
 });
 
-app.post('/api/k8s/pods', async (req, res) => {
+app.post('/kube-migrate/k8s/pods', async (req, res) => {
   handleK8sApiRequest(req, res, '/api/v1/pods');
 });
 
-app.post('/api/k8s/persistentvolumes', async (req, res) => {
+app.post('/kube-migrate/k8s/persistentvolumes', async (req, res) => {
   handleK8sApiRequest(req, res, '/api/v1/persistentvolumes');
 });
 
@@ -723,7 +735,7 @@ async function handleK8sApiRequest(req, res, k8sPath) {
 }
 
 // Legacy specific endpoint for nodes (can be removed once the generic endpoint is tested)
-app.post('/api/k8s/nodes-old', async (req, res) => {
+app.post('/kube-migrate/k8s/nodes-old', async (req, res) => {
   try {
     const { kubeconfig } = req.body;
     
@@ -810,7 +822,7 @@ app.post('/api/k8s/nodes-old', async (req, res) => {
 });
 
 // Proxy Kubernetes API requests for pods
-app.post('/api/k8s/pods', async (req, res) => {
+app.post('/kube-migrate/k8s/pods', async (req, res) => {
   try {
     const { kubeconfig, namespace } = req.body;
     
@@ -898,7 +910,7 @@ app.post('/api/k8s/pods', async (req, res) => {
 });
 
 // Proxy Kubernetes API request for pod YAML
-app.post('/api/k8s/pod-yaml', async (req, res) => {
+app.post('/kube-migrate/k8s/pod-yaml', async (req, res) => {
   try {
     const { kubeconfig, podName, namespace } = req.body;
     
@@ -1103,7 +1115,7 @@ export async function makeK8sRequestWithRetry(kubeconfig, apiPath, method = 'GET
 }
 
 // New endpoint to get namespaces
-app.post('/api/k8s/namespaces', async (req, res) => {
+app.post('/kube-migrate/k8s/namespaces', async (req, res) => {
   try {
     const { kubeconfig } = req.body;
 
@@ -1137,7 +1149,7 @@ app.post('/api/k8s/namespaces', async (req, res) => {
 });
 
 // New endpoint to get services
-app.post('/api/k8s/services', async (req, res) => {
+app.post('/kube-migrate/k8s/services', async (req, res) => {
   try {
     const { kubeconfig, namespace = '' } = req.body;
 
@@ -1179,7 +1191,7 @@ app.post('/api/k8s/services', async (req, res) => {
 });
 
 // New endpoint to get kubeconfig details
-app.post('/api/k8s/kubeconfig-details', async (req, res) => {
+app.post('/kube-migrate/k8s/kubeconfig-details', async (req, res) => {
   try {
     const { kubeconfig } = req.body;
     
@@ -1261,9 +1273,9 @@ function createEmptyK8sResourceList(kind) {
 
 // Add missing Kubernetes API endpoints
 // Deployments endpoint
-app.post('/api/k8s/deployments', async (req, res) => {
+app.post('/kube-migrate/k8s/deployments', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/deployments request');
+    console.log('Handling /kube-migrate/k8s/deployments request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1282,9 +1294,9 @@ app.post('/api/k8s/deployments', async (req, res) => {
 });
 
 // ReplicaSets endpoint
-app.post('/api/k8s/replicasets', async (req, res) => {
+app.post('/kube-migrate/k8s/replicasets', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/replicasets request');
+    console.log('Handling /kube-migrate/k8s/replicasets request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1303,9 +1315,9 @@ app.post('/api/k8s/replicasets', async (req, res) => {
 });
 
 // StatefulSets endpoint
-app.post('/api/k8s/statefulsets', async (req, res) => {
+app.post('/kube-migrate/k8s/statefulsets', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/statefulsets request');
+    console.log('Handling /kube-migrate/k8s/statefulsets request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1324,9 +1336,9 @@ app.post('/api/k8s/statefulsets', async (req, res) => {
 });
 
 // DaemonSets endpoint
-app.post('/api/k8s/daemonsets', async (req, res) => {
+app.post('/kube-migrate/k8s/daemonsets', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/daemonsets request');
+    console.log('Handling /kube-migrate/k8s/daemonsets request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1345,9 +1357,9 @@ app.post('/api/k8s/daemonsets', async (req, res) => {
 });
 
 // Jobs endpoint
-app.post('/api/k8s/jobs', async (req, res) => {
+app.post('/kube-migrate/k8s/jobs', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/jobs request');
+    console.log('Handling /kube-migrate/k8s/jobs request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1366,9 +1378,9 @@ app.post('/api/k8s/jobs', async (req, res) => {
 });
 
 // CronJobs endpoint
-app.post('/api/k8s/cronjobs', async (req, res) => {
+app.post('/kube-migrate/k8s/cronjobs', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/cronjobs request');
+    console.log('Handling /kube-migrate/k8s/cronjobs request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1387,9 +1399,9 @@ app.post('/api/k8s/cronjobs', async (req, res) => {
 });
 
 // Ingresses endpoint
-app.post('/api/k8s/ingresses', async (req, res) => {
+app.post('/kube-migrate/k8s/ingresses', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/ingresses request');
+    console.log('Handling /kube-migrate/k8s/ingresses request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1408,9 +1420,9 @@ app.post('/api/k8s/ingresses', async (req, res) => {
 });
 
 // ConfigMaps endpoint
-app.post('/api/k8s/configmaps', async (req, res) => {
+app.post('/kube-migrate/k8s/configmaps', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/configmaps request');
+    console.log('Handling /kube-migrate/k8s/configmaps request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1429,9 +1441,9 @@ app.post('/api/k8s/configmaps', async (req, res) => {
 });
 
 // Secrets endpoint
-app.post('/api/k8s/secrets', async (req, res) => {
+app.post('/kube-migrate/k8s/secrets', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/secrets request');
+    console.log('Handling /kube-migrate/k8s/secrets request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1450,9 +1462,9 @@ app.post('/api/k8s/secrets', async (req, res) => {
 });
 
 // ResourceQuotas endpoint
-app.post('/api/k8s/resourcequotas', async (req, res) => {
+app.post('/kube-migrate/k8s/resourcequotas', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/resourcequotas request');
+    console.log('Handling /kube-migrate/k8s/resourcequotas request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1471,9 +1483,9 @@ app.post('/api/k8s/resourcequotas', async (req, res) => {
 });
 
 // LimitRanges endpoint
-app.post('/api/k8s/limitranges', async (req, res) => {
+app.post('/kube-migrate/k8s/limitranges', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/limitranges request');
+    console.log('Handling /kube-migrate/k8s/limitranges request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1492,9 +1504,9 @@ app.post('/api/k8s/limitranges', async (req, res) => {
 });
 
 // PersistentVolumes endpoint
-app.post('/api/k8s/persistentvolumes', async (req, res) => {
+app.post('/kube-migrate/k8s/persistentvolumes', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/persistentvolumes request');
+    console.log('Handling /kube-migrate/k8s/persistentvolumes request');
     const { kubeconfig } = req.body;
     
     if (!kubeconfig) {
@@ -1513,9 +1525,9 @@ app.post('/api/k8s/persistentvolumes', async (req, res) => {
 });
 
 // PersistentVolumeClaims endpoint
-app.post('/api/k8s/persistentvolumeclaims', async (req, res) => {
+app.post('/kube-migrate/k8s/persistentvolumeclaims', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/persistentvolumeclaims request');
+    console.log('Handling /kube-migrate/k8s/persistentvolumeclaims request');
     const { kubeconfig, namespace } = req.body;
     
     if (!kubeconfig) {
@@ -1534,9 +1546,9 @@ app.post('/api/k8s/persistentvolumeclaims', async (req, res) => {
 });
 
 // StorageClasses endpoint
-app.post('/api/k8s/storageclasses', async (req, res) => {
+app.post('/kube-migrate/k8s/storageclasses', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/storageclasses request');
+    console.log('Handling /kube-migrate/k8s/storageclasses request');
     const { kubeconfig } = req.body;
     
     if (!kubeconfig) {
@@ -1555,9 +1567,9 @@ app.post('/api/k8s/storageclasses', async (req, res) => {
 });
 
 // Metrics endpoint
-app.post('/api/k8s/metrics', async (req, res) => {
+app.post('/kube-migrate/k8s/metrics', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/metrics request');
+    console.log('Handling /kube-migrate/k8s/metrics request');
     const { kubeconfig } = req.body;
     
     if (!kubeconfig) {
@@ -1592,9 +1604,9 @@ app.post('/api/k8s/metrics', async (req, res) => {
 });
 
 // Logs endpoint
-app.post('/api/k8s/logs', async (req, res) => {
+app.post('/kube-migrate/k8s/logs', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/logs request');
+    console.log('Handling /kube-migrate/k8s/logs request');
     const { kubeconfig, podName, namespace, container, tail } = req.body;
     
     if (!kubeconfig) {
@@ -1615,9 +1627,9 @@ app.post('/api/k8s/logs', async (req, res) => {
 });
 
 // New endpoint to generate YAML for selected components
-app.post('/api/k8s/generate-yaml', async (req, res) => {
+app.post('/kube-migrate/k8s/generate-yaml', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/generate-yaml request');
+    console.log('Handling /kube-migrate/k8s/generate-yaml request');
     const { kubeconfig, resources } = req.body;
     
     if (!kubeconfig) {
@@ -1754,9 +1766,9 @@ function getApiVersionForKind(kind) {
 }
 
 // Migration endpoint to transfer resources between clusters
-app.post('/api/k8s/migrate', async (req, res) => {
+app.post('/kube-migrate/k8s/migrate', async (req, res) => {
   try {
-    console.log('Handling /api/k8s/migrate request');
+    console.log('Handling /kube-migrate/k8s/migrate request');
     const { sourceKubeconfig, targetKubeconfig, resources, options } = req.body;
     
     if (!sourceKubeconfig || !targetKubeconfig) {
@@ -1822,7 +1834,7 @@ app.post('/api/k8s/migrate', async (req, res) => {
 });
 
 // Migration status endpoint
-app.get('/api/k8s/migration/:id/status', (req, res) => {
+app.get('/kube-migrate/k8s/migration/:id/status', (req, res) => {
   const { id } = req.params;
   
   // In a real implementation, we would store migration statuses in a database
@@ -2090,7 +2102,7 @@ attachTenantEndpoints(app, makeK8sRequestWithRetry);
 const activeJobs = new Map(); // Track active migrations
 
 // Start a new migration
-app.post('/api/migrations/start', async (req, res) => {
+app.post('/kube-migrate/migrations/start', async (req, res) => {
   try {
     const { migrationId, sourceKubeconfig, targetKubeconfig, resources, options } = req.body;
     
@@ -2140,7 +2152,7 @@ app.post('/api/migrations/start', async (req, res) => {
 });
 
 // Get migration status
-app.get('/api/migrations/:id/status', (req, res) => {
+app.get('/kube-migrate/migrations/:id/status', (req, res) => {
   const { id } = req.params;
   const job = activeJobs.get(id);
   
@@ -2167,7 +2179,7 @@ app.get('/api/migrations/:id/status', (req, res) => {
 });
 
 // Cancel migration
-app.post('/api/migrations/:id/cancel', (req, res) => {
+app.post('/kube-migrate/migrations/:id/cancel', (req, res) => {
   const { id } = req.params;
   const job = activeJobs.get(id);
   

@@ -69,7 +69,7 @@ export const getEKSNodes = async (config: EKSClusterConfig): Promise<EKSNodeInfo
     console.log(`Fetching nodes for ${config.clusterName} in ${config.region}`);
     
     // Make request to Kubernetes API for nodes, using the proxy server
-    const response = await fetch(`http://localhost:3001/api/k8s/nodes`, {
+    const response = await fetch(`http://localhost:3001/kube-migrate/k8s/nodes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -116,7 +116,7 @@ export const getEKSPods = async (config: EKSClusterConfig): Promise<EKSPodInfo[]
     console.log(`Fetching pods for ${config.clusterName} in ${config.region}`);
     
     // Make request to Kubernetes API for pods, using the proxy server
-    const response = await fetch(`http://localhost:3001/api/k8s/pods`, {
+    const response = await fetch(`http://localhost:3001/kube-migrate/k8s/pods`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -166,7 +166,7 @@ export const getEKSPVs = async (config: EKSClusterConfig): Promise<EKSPVInfo[]> 
     console.log(`Fetching persistent volumes for ${config.clusterName} in ${config.region}`);
     
     // Make request to Kubernetes API for persistent volumes, using the proxy server
-    const response = await fetch(`http://localhost:3001/api/k8s/persistentvolumes`, {
+    const response = await fetch(`http://localhost:3001/kube-migrate/k8s/persistentvolumes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -238,7 +238,7 @@ export const migrateResources = async (
     };
     
     // Initiate migration
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/k8s/migrate`, {
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/kube-migrate/k8s/migrate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -266,7 +266,7 @@ export const migrateResources = async (
     while (!migrationComplete) {
       await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2 seconds
       
-      const statusResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/k8s/migration/${migrationId}/status`);
+      const statusResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/kube-migrate/k8s/migration/${migrationId}/status`);
       
       if (!statusResponse.ok) {
         throw new Error('Failed to fetch migration status');

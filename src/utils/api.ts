@@ -6,88 +6,88 @@ export const KUBERNETES_API = {
   // Endpoints for Kubernetes operations
   
   // Namespace section
-  GET_NAMESPACES: `${API_BASE_URL}/api/k8s/namespaces`,
+  GET_NAMESPACES: `${API_BASE_URL}/kube-migrate/k8s/namespaces`,
   
   // Node section
-  GET_NODES: `${API_BASE_URL}/api/k8s/nodes`,
+  GET_NODES: `${API_BASE_URL}/kube-migrate/k8s/nodes`,
   
   // Workloads section
-  GET_PODS: `${API_BASE_URL}/api/k8s/pods`,
-  GET_POD_YAML: `${API_BASE_URL}/api/k8s/pod-yaml`,
-  GET_DEPLOYMENTS: `${API_BASE_URL}/api/k8s/deployments`,
-  GET_REPLICASETS: `${API_BASE_URL}/api/k8s/replicasets`,
-  GET_STATEFULSETS: `${API_BASE_URL}/api/k8s/statefulsets`,
-  GET_DAEMONSETS: `${API_BASE_URL}/api/k8s/daemonsets`,
-  GET_JOBS: `${API_BASE_URL}/api/k8s/jobs`,
-  GET_CRONJOBS: `${API_BASE_URL}/api/k8s/cronjobs`,
+  GET_PODS: `${API_BASE_URL}/kube-migrate/k8s/pods`,
+  GET_POD_YAML: `${API_BASE_URL}/kube-migrate/k8s/pod-yaml`,
+  GET_DEPLOYMENTS: `${API_BASE_URL}/kube-migrate/k8s/deployments`,
+  GET_REPLICASETS: `${API_BASE_URL}/kube-migrate/k8s/replicasets`,
+  GET_STATEFULSETS: `${API_BASE_URL}/kube-migrate/k8s/statefulsets`,
+  GET_DAEMONSETS: `${API_BASE_URL}/kube-migrate/k8s/daemonsets`,
+  GET_JOBS: `${API_BASE_URL}/kube-migrate/k8s/jobs`,
+  GET_CRONJOBS: `${API_BASE_URL}/kube-migrate/k8s/cronjobs`,
   
   // Networking section
-  GET_SERVICES: `${API_BASE_URL}/api/k8s/services`,
-  GET_INGRESSES: `${API_BASE_URL}/api/k8s/ingresses`,
+  GET_SERVICES: `${API_BASE_URL}/kube-migrate/k8s/services`,
+  GET_INGRESSES: `${API_BASE_URL}/kube-migrate/k8s/ingresses`,
   
   // Configurations section
-  GET_CONFIGMAPS: `${API_BASE_URL}/api/k8s/configmaps`,
-  GET_SECRETS: `${API_BASE_URL}/api/k8s/secrets`,
-  GET_RESOURCE_QUOTAS: `${API_BASE_URL}/api/k8s/resourcequotas`,
-  GET_LIMIT_RANGES: `${API_BASE_URL}/api/k8s/limitranges`,
+  GET_CONFIGMAPS: `${API_BASE_URL}/kube-migrate/k8s/configmaps`,
+  GET_SECRETS: `${API_BASE_URL}/kube-migrate/k8s/secrets`,
+  GET_RESOURCE_QUOTAS: `${API_BASE_URL}/kube-migrate/k8s/resourcequotas`,
+  GET_LIMIT_RANGES: `${API_BASE_URL}/kube-migrate/k8s/limitranges`,
   
   // Storage section
-  GET_PERSISTENT_VOLUMES: `${API_BASE_URL}/api/k8s/persistentvolumes`,
-  GET_PERSISTENT_VOLUME_CLAIMS: `${API_BASE_URL}/api/k8s/persistentvolumeclaims`,
-  GET_STORAGE_CLASSES: `${API_BASE_URL}/api/k8s/storageclasses`,
+  GET_PERSISTENT_VOLUMES: `${API_BASE_URL}/kube-migrate/k8s/persistentvolumes`,
+  GET_PERSISTENT_VOLUME_CLAIMS: `${API_BASE_URL}/kube-migrate/k8s/persistentvolumeclaims`,
+  GET_STORAGE_CLASSES: `${API_BASE_URL}/kube-migrate/k8s/storageclasses`,
   
   // Monitoring & Logging
-  GET_METRICS: `${API_BASE_URL}/api/k8s/metrics`,
-  GET_LOGS: `${API_BASE_URL}/api/k8s/logs`,
+  GET_METRICS: `${API_BASE_URL}/kube-migrate/k8s/metrics`,
+  GET_LOGS: `${API_BASE_URL}/kube-migrate/k8s/logs`,
   
   // Debug and utility
-  DEBUG_TOKEN: `${API_BASE_URL}/api/k8s/debug/token`,
-  GET_KUBECONFIG_DETAILS: `${API_BASE_URL}/api/k8s/kubeconfig-details`,
+  DEBUG_TOKEN: `${API_BASE_URL}/kube-migrate/debug/token`,
+  GET_KUBECONFIG_DETAILS: `${API_BASE_URL}/kube-migrate/k8s/kubeconfig-details`,
   
   // Migration utilities
-  GENERATE_YAML: `${API_BASE_URL}/api/k8s/generate-yaml`,
-  MIGRATE_RESOURCES: `${API_BASE_URL}/api/k8s/migrate`,
-  MIGRATION_STATUS: `${API_BASE_URL}/api/k8s/migration`,
+  GENERATE_YAML: `${API_BASE_URL}/kube-migrate/k8s/generate-yaml`,
+  MIGRATE_RESOURCES: `${API_BASE_URL}/kube-migrate/k8s/migrate`,
+  MIGRATION_STATUS: `${API_BASE_URL}/kube-migrate/k8s/migration`,
   
   // Real migration endpoints
-  MIGRATION_START: `${API_BASE_URL}/api/migrations/start`,
-  MIGRATION_STATUS_CHECK: (id: string) => `${API_BASE_URL}/api/migrations/${id}/status`,
-  MIGRATION_CANCEL: (id: string) => `${API_BASE_URL}/api/migrations/${id}/cancel`,
+  MIGRATION_START: `${API_BASE_URL}/kube-migrate/migrations/start`,
+  MIGRATION_STATUS_CHECK: (id: string) => `${API_BASE_URL}/kube-migrate/migrations/${id}/status`,
+  MIGRATION_CANCEL: (id: string) => `${API_BASE_URL}/kube-migrate/migrations/${id}/cancel`,
   
   // Multi-tenant specific endpoints
-  TENANT_NAMESPACES: `${API_BASE_URL}/api/k8s/tenant/namespaces`,
-  TENANT_PODS: `${API_BASE_URL}/api/k8s/tenant/pods`,
-  TENANT_DEPLOYMENTS: `${API_BASE_URL}/api/k8s/tenant/deployments`,
-  TENANT_RESOURCE_USAGE: `${API_BASE_URL}/api/k8s/tenant/resource-usage`,
+  TENANT_NAMESPACES: `${API_BASE_URL}/kube-migrate/k8s/tenant/namespaces`,
+  TENANT_PODS: `${API_BASE_URL}/kube-migrate/k8s/tenant/pods`,
+  TENANT_DEPLOYMENTS: `${API_BASE_URL}/kube-migrate/k8s/tenant/deployments`,
+  TENANT_RESOURCE_USAGE: `${API_BASE_URL}/kube-migrate/k8s/tenant/resource-usage`,
 };
 
 // List of endpoints in development that aren't fully implemented yet
 const DEVELOPMENT_ENDPOINTS = [
-  '/api/k8s/namespaces',
-  '/api/k8s/nodes',
-  '/api/k8s/pods',
-  '/api/k8s/deployments',
-  '/api/k8s/replicasets',
-  '/api/k8s/statefulsets',
-  '/api/k8s/daemonsets',
-  '/api/k8s/jobs',
-  '/api/k8s/cronjobs',
-  '/api/k8s/services',
-  '/api/k8s/ingresses',
-  '/api/k8s/configmaps',
-  '/api/k8s/secrets',
-  '/api/k8s/resourcequotas',
-  '/api/k8s/limitranges',
-  '/api/k8s/persistentvolumes',
-  '/api/k8s/persistentvolumeclaims',
-  '/api/k8s/storageclasses',
-  '/api/k8s/metrics',
-  '/api/k8s/logs',
+  '/kube-migrate/k8s/namespaces',
+  '/kube-migrate/k8s/nodes',
+  '/kube-migrate/k8s/pods',
+  '/kube-migrate/k8s/deployments',
+  '/kube-migrate/k8s/replicasets',
+  '/kube-migrate/k8s/statefulsets',
+  '/kube-migrate/k8s/daemonsets',
+  '/kube-migrate/k8s/jobs',
+  '/kube-migrate/k8s/cronjobs',
+  '/kube-migrate/k8s/services',
+  '/kube-migrate/k8s/ingresses',
+  '/kube-migrate/k8s/configmaps',
+  '/kube-migrate/k8s/secrets',
+  '/kube-migrate/k8s/resourcequotas',
+  '/kube-migrate/k8s/limitranges',
+  '/kube-migrate/k8s/persistentvolumes',
+  '/kube-migrate/k8s/persistentvolumeclaims',
+  '/kube-migrate/k8s/storageclasses',
+  '/kube-migrate/k8s/metrics',
+  '/kube-migrate/k8s/logs',
   // Add tenant endpoints to development endpoints
-  '/api/k8s/tenant/namespaces',
-  '/api/k8s/tenant/pods',
-  '/api/k8s/tenant/deployments',
-  '/api/k8s/tenant/resource-usage',
+  '/kube-migrate/k8s/tenant/namespaces',
+  '/kube-migrate/k8s/tenant/pods',
+  '/kube-migrate/k8s/tenant/deployments',
+  '/kube-migrate/k8s/tenant/resource-usage',
 ];
 
 // Helper function to make API requests to the proxy server

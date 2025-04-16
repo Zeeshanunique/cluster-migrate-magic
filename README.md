@@ -70,7 +70,7 @@ A powerful web application for managing, monitoring, and migrating Kubernetes cl
 1. Start the server in one terminal:
    ```bash
    # Start the server component
-   npm run server:dev
+   npm run server
    ```
 
 2. Start the frontend in another terminal:
@@ -79,25 +79,98 @@ A powerful web application for managing, monitoring, and migrating Kubernetes cl
    npm run dev
    ```
 
-3. Access the application:
-   - Frontend: http://localhost:5173
+3. Or use the combined development command:
+   ```bash
+   npm run dev:full
+   ```
+
+4. Access the application:
+   - Frontend: http://localhost:8080
    - Server API: http://localhost:3001
 
 ### Production Mode
 
 1. Build the application:
    ```bash
-   npm run build
+   npm run build:prod
    ```
 
 2. Start the production server (serves both frontend and API):
    ```bash
+   # For Linux/Mac
    npm run start
+   
+   # For Windows
+   npm run start:win
    ```
 
 3. Access the production application at http://localhost:3001
 
 ### Using Docker
+
+1. Build and run using Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+
+2. Access the application at http://localhost:3001
+
+3. To stop the application:
+   ```bash
+   docker-compose down
+   ```
+
+### Production Deployment
+
+1. Configure production environment variables:
+   ```bash
+   # Copy the production environment template
+   cp .env.example .env.production
+   
+   # Edit the production environment settings
+   nano .env.production
+   ```
+
+2. Build the application for production:
+   ```bash
+   npm run build:prod
+   ```
+
+3. Start the production server:
+   ```bash
+   # For Linux/Mac
+   npm run start
+   
+   # For Windows
+   npm run start:win
+   ```
+
+4. For proper production deployment, it's recommended to use Docker:
+   ```bash
+   # Build the Docker image
+   docker build -t kube-migrate-magic:latest .
+   
+   # Run the Docker container
+   docker run -p 3001:3001 -d kube-migrate-magic:latest
+   ```
+
+## API Endpoints
+
+The application uses the following API endpoint pattern:
+
+```
+/kube-migrate/k8s/...
+```
+
+All API endpoints previously using `/api/` now use `/kube-migrate/` as the base path.
+
+Main API categories:
+
+- `/kube-migrate/k8s/nodes` - Retrieve node information
+- `/kube-migrate/k8s/pods` - Retrieve pod information
+- `/kube-migrate/k8s/persistentvolumes` - Retrieve persistent volume information
+- `/kube-migrate/k8s/tenant/...` - Multi-tenant resource endpoints
+- `/kube-migrate/debug/...` - Debugging and validation endpoints
 
 ```bash
 # Build the Docker image

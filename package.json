@@ -1,5 +1,5 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "kube-migrate-magic",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,8 +9,12 @@
     "dev:full": "concurrently \"npm run dev\" \"npm run server\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "build:prod": "vite build --mode production",
+    "postbuild:prod": "node -e \"require('fs').copyFileSync('.env.production', 'dist/.env')\"",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "NODE_ENV=production node server/proxy.js",
+    "start:win": "set NODE_ENV=production&& node server/proxy.js"
   },
   "dependencies": {
     "@aws-sdk/client-eks": "^3.787.0",

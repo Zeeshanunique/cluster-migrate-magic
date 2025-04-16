@@ -366,7 +366,7 @@ export async function checkK8sToken(kubeconfig: string): Promise<boolean> {
     }
 
     // If no environment token, check with the proxy server
-    const response = await fetch(`${API_PROXY_URL}/api/debug/token`, {
+    const response = await fetch(`${API_PROXY_URL}/kube-migrate/debug/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -395,7 +395,7 @@ export async function checkK8sToken(kubeconfig: string): Promise<boolean> {
  */
 export async function getK8sNodes(kubeconfig: string): Promise<any> {
   try {
-    const response = await fetch('http://localhost:3001/api/k8s/nodes', {
+    const response = await fetch('http://localhost:3001/kube-migrate/k8s/nodes', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -427,7 +427,7 @@ export async function getClusterInfo(kubeconfig: string): Promise<any> {
     const eksClusterName = extractEksClusterName(kubeconfig) || clusterName;
 
     // Get node info to extract version
-    const nodeResponse = await fetch(`${API_PROXY_URL}/api/k8s/nodes`, {
+    const nodeResponse = await fetch(`${API_PROXY_URL}/kube-migrate/k8s/nodes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -470,7 +470,7 @@ export async function getClusterInfo(kubeconfig: string): Promise<any> {
  */
 export async function debugKubeconfig(kubeconfig: string): Promise<any> {
   try {
-    const response = await fetch('http://localhost:3001/api/debug/kubeconfig', {
+    const response = await fetch('http://localhost:3001/kube-migrate/debug/kubeconfig', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

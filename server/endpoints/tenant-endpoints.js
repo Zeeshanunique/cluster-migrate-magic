@@ -5,7 +5,7 @@
 // Function to attach tenant endpoints to express app
 export function attachTenantEndpoints(app, makeK8sRequestWithRetry) {
   // Get all tenant namespaces
-  app.post('/api/k8s/tenant/namespaces', async (req, res) => {
+  app.post('/kube-migrate/k8s/tenant/namespaces', async (req, res) => {
     try {
       const { kubeconfig } = req.body;
       
@@ -32,7 +32,7 @@ export function attachTenantEndpoints(app, makeK8sRequestWithRetry) {
   });
   
   // Get all pods across all tenant namespaces
-  app.post('/api/k8s/tenant/pods', async (req, res) => {
+  app.post('/kube-migrate/k8s/tenant/pods', async (req, res) => {
     try {
       const { kubeconfig } = req.body;
       
@@ -75,7 +75,7 @@ export function attachTenantEndpoints(app, makeK8sRequestWithRetry) {
   
   // Similar endpoints for other resources like deployments, services, etc.
   // Example for deployments
-  app.post('/api/k8s/tenant/deployments', async (req, res) => {
+  app.post('/kube-migrate/k8s/tenant/deployments', async (req, res) => {
     try {
       const { kubeconfig } = req.body;
       
@@ -117,7 +117,7 @@ export function attachTenantEndpoints(app, makeK8sRequestWithRetry) {
   });
   
   // Endpoint to get resource usage across all tenant namespaces
-  app.post('/api/k8s/tenant/resource-usage', async (req, res) => {
+  app.post('/kube-migrate/k8s/tenant/resource-usage', async (req, res) => {
     try {
       const { kubeconfig } = req.body;
       
