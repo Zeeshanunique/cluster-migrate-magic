@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { ChevronRight, Server, MoreHorizontal, Download, RefreshCw, Trash2, CheckSquare, AlertTriangle, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { Cluster, clusterService } from '@/utils/supabase';
+import { Cluster, clusterService } from '@/utils/dynamodb';
 
 import {
   DropdownMenu,

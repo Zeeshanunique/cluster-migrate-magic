@@ -15,7 +15,7 @@ import {
   Server
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Cluster, clusterService } from '@/utils/supabase';
+import { Cluster, clusterService } from '@/utils/dynamodb';
 
 const MultiTenant = () => {
   const navigate = useNavigate();

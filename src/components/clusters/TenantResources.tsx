@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Cluster } from '@/utils/supabase';
+import { Cluster } from '@/utils/dynamodb';
 import { KUBERNETES_API, apiTenantRequest } from '@/utils/api';
 import { toast } from 'sonner';
 import { 

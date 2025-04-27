@@ -37,7 +37,7 @@ import AWSClusterConfig from './AWSClusterConfig';
 import ResourceInventory from './ResourceInventory';
 import CompatibilityCheck from './CompatibilityCheck';
 import { useAuth } from '@/contexts/AuthContext';
-import { Cluster, clusterService } from '@/utils/supabase';
+import { Cluster, clusterService } from '@/utils/dynamodb';
 import { 
   EKSClusterConfig, 
   EKSNodeInfo, 

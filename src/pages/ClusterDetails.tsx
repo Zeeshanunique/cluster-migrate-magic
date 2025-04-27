@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { Cluster, clusterService } from '@/utils/supabase';
+import { Cluster, clusterService } from '@/utils/dynamodb';
 import { KUBERNETES_API, apiRequest } from '@/utils/api';
 import { fetchClusterStatus, parseKubeContexts, parseKubeClusters } from '@/utils/kubernetes';
 import Navbar from '@/components/layout/Navbar';

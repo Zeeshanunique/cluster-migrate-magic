@@ -22,7 +22,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { CreateClusterPayload, clusterService } from '@/utils/supabase';
+import { CreateClusterPayload, clusterService } from '@/utils/dynamodb';
 import { toast } from 'sonner';
 
 const AddCluster = () => {

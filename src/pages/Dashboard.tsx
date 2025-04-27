@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/tabs';
 import { Plus, Search, Filter, Loader2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { Cluster, clusterService } from '@/utils/supabase';
+import { Cluster, clusterService } from '@/utils/dynamodb';
 
 const Dashboard = () => {
   const navigate = useNavigate();

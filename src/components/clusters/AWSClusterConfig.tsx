@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EKSClusterConfig, generateKubeconfig } from '@/utils/aws';
 import { Loader2, Upload, RefreshCw, Check } from 'lucide-react';
 import { toast } from "sonner";
-import { Cluster } from '@/utils/supabase';
+import { Cluster } from '@/utils/dynamodb';
 
 interface AWSClusterConfigProps {
   title: string;

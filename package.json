@@ -17,9 +17,12 @@
     "start:win": "set NODE_ENV=production&& node server/proxy.js"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.797.0",
+    "@aws-sdk/client-dynamodb": "^3.797.0",
     "@aws-sdk/client-eks": "^3.787.0",
     "@aws-sdk/client-sts": "^3.787.0",
     "@aws-sdk/credential-providers": "^3.787.0",
+    "@aws-sdk/lib-dynamodb": "^3.797.0",
     "@aws-sdk/signature-v4": "^3.370.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",

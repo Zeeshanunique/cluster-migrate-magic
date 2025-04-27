@@ -28,7 +28,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { CreateClusterPayload, clusterService } from '@/utils/supabase';
+import { CreateClusterPayload, clusterService } from '@/utils/dynamodb';
 import { generateKubeconfig } from '@/utils/aws';
 import { toast } from 'sonner';
 

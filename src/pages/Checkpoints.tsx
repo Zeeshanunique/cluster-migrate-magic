@@ -26,7 +26,7 @@ import { Calendar, Plus, Search, Filter, Clock, ArrowRight, CheckCircle, AlertTr
 import { toast } from 'sonner';
 import BlurContainer from '@/components/ui/BlurContainer';
 import { Skeleton } from '@/components/ui/skeleton';
-import { checkpointService, Checkpoint, clusterService } from '@/utils/supabase';
+import { checkpointService, Checkpoint, clusterService } from '@/utils/dynamodb';
 
 // Sample timeline data
 const timelineSteps = [

@@ -61,7 +61,7 @@ export default function SignUpForm() {
       
       if (user) {
         toast.success('Account created successfully');
-        navigate('/dashboard');
+        navigate('/');
       } else {
         toast.info('Please check your email to confirm your account');
       }
