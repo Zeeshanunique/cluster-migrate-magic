@@ -83,6 +83,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log('Signing in with Cognito...');
       const { user, session } = await authService.signIn(credentials);
       console.log('Sign in successful:', user ? `User ID: ${user.id}` : 'No user returned');
+      
+      if (user && session) {
+        setUser(user);
+        setSession(session);
+        // Store the session in localStorage to persist it
+        localStorage.setItem('accessToken', session.access_token);
+        localStorage.setItem('refreshToken', session.refresh_token);
+      }
+      
       return { user, session };
     } catch (error) {
       console.error('Error signing in with Cognito:', error);

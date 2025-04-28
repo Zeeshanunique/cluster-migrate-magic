@@ -46,11 +46,14 @@ export default function SignInForm() {
   const onSubmit = async (data: FormValues) => {
     setIsLoading(true);
     try {
-      const { user } = await signIn(data);
+      const { user, session } = await signIn(data);
       
-      if (user) {
+      if (user && session) {
         toast.success('Signed in successfully');
-        navigate('/dashboard');
+        // Force a small delay to ensure state is updated
+        setTimeout(() => {
+          navigate('/dashboard', { replace: true });
+        }, 100);
       } else {
         toast.error('Invalid email or password');
       }
