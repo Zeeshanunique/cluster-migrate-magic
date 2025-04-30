@@ -127,6 +127,23 @@ const MigrationWizard = () => {
   const [nodes, setNodes] = useState<EKSNodeInfo[]>([]);
   const [pods, setPods] = useState<EKSPodInfo[]>([]);
   const [persistentVolumes, setPersistentVolumes] = useState<EKSPVInfo[]>([]);
+  const [persistentVolumeClaims, setPersistentVolumeClaims] = useState<any[]>([]);
+  
+  // Workload resources
+  const [deployments, setDeployments] = useState<any[]>([]);
+  const [replicaSets, setReplicaSets] = useState<any[]>([]);
+  const [statefulSets, setStatefulSets] = useState<any[]>([]);
+  const [daemonSets, setDaemonSets] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [cronJobs, setCronJobs] = useState<any[]>([]);
+  
+  // Networking resources
+  const [services, setServices] = useState<any[]>([]);
+  const [ingresses, setIngresses] = useState<any[]>([]);
+  
+  // Configuration resources
+  const [configMaps, setConfigMaps] = useState<any[]>([]);
+  const [secrets, setSecrets] = useState<any[]>([]);
 
   // Compatibility check states
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
@@ -318,18 +335,286 @@ const MigrationWizard = () => {
           return [];
         });
       
-      // Fetch core resources in parallel - just like ClusterDetails
+      // Fetch core resources in parallel
       const [nodesData, podsData, pvsData] = await Promise.all([
         getEKSNodes(sourceConfig),
         getEKSPods(sourceConfig),
         getEKSPVs(sourceConfig)
       ]);
 
+      // Fetch PVCs separately since they're namespaced
+      const pvcsData = await fetch(`http://localhost:3001/api/k8s/persistentvolumeclaims`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          kubeconfig: sourceConfig.kubeconfig,
+          region: sourceConfig.region,
+          clusterName: sourceConfig.clusterName 
+        })
+      }).then(res => res.json()).catch(() => ({ items: [] }));
+
+      // Fetch workload resources
+      const [deploymentsData, replicaSetsData, statefulSetsData, daemonSetsData, jobsData, cronJobsData] = await Promise.all([
+        fetch(`http://localhost:3001/api/k8s/deployments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/replicasets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/statefulsets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/daemonsets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/jobs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/cronjobs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] }))
+      ]);
+      
+      // Fetch networking resources
+      const [servicesData, ingressesData] = await Promise.all([
+        fetch(`http://localhost:3001/api/k8s/services`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/ingresses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] }))
+      ]);
+
+      // Fetch configuration resources
+      const [configMapsData, secretsData] = await Promise.all([
+        fetch(`http://localhost:3001/api/k8s/configmaps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] })),
+        
+        fetch(`http://localhost:3001/api/k8s/secrets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            kubeconfig: sourceConfig.kubeconfig,
+            region: sourceConfig.region,
+            clusterName: sourceConfig.clusterName 
+          })
+        }).then(res => res.json()).catch(() => ({ items: [] }))
+      ]);
+
+      // Process workload resources
+      const deployments = deploymentsData.items?.map((deployment: any) => ({
+        name: deployment.metadata?.name || 'unknown',
+        namespace: deployment.metadata?.namespace || 'default',
+        replicas: deployment.spec?.replicas || 0,
+        availableReplicas: deployment.status?.availableReplicas || 0,
+        strategy: deployment.spec?.strategy?.type || 'RollingUpdate',
+        age: calculateAge(deployment.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const replicaSets = replicaSetsData.items?.map((rs: any) => ({
+        name: rs.metadata?.name || 'unknown',
+        namespace: rs.metadata?.namespace || 'default',
+        desired: rs.spec?.replicas || 0,
+        current: rs.status?.replicas || 0,
+        ready: rs.status?.readyReplicas || 0,
+        age: calculateAge(rs.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const statefulSets = statefulSetsData.items?.map((sts: any) => ({
+        name: sts.metadata?.name || 'unknown',
+        namespace: sts.metadata?.namespace || 'default',
+        replicas: sts.spec?.replicas || 0,
+        readyReplicas: sts.status?.readyReplicas || 0,
+        serviceName: sts.spec?.serviceName || '',
+        age: calculateAge(sts.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const daemonSets = daemonSetsData.items?.map((ds: any) => ({
+        name: ds.metadata?.name || 'unknown',
+        namespace: ds.metadata?.namespace || 'default',
+        desired: ds.status?.desiredNumberScheduled || 0,
+        current: ds.status?.currentNumberScheduled || 0,
+        ready: ds.status?.numberReady || 0,
+        age: calculateAge(ds.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const jobs = jobsData.items?.map((job: any) => ({
+        name: job.metadata?.name || 'unknown',
+        namespace: job.metadata?.namespace || 'default',
+        completions: job.spec?.completions || 0,
+        duration: job.status?.completionTime && job.status?.startTime 
+          ? calculateDuration(job.status.startTime, job.status.completionTime)
+          : 'N/A',
+        age: calculateAge(job.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const cronJobs = cronJobsData.items?.map((cj: any) => ({
+        name: cj.metadata?.name || 'unknown',
+        namespace: cj.metadata?.namespace || 'default',
+        schedule: cj.spec?.schedule || '',
+        lastSchedule: cj.status?.lastScheduleTime 
+          ? calculateAge(cj.status.lastScheduleTime)
+          : 'Never',
+        age: calculateAge(cj.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      // Process networking resources
+      const services = servicesData.items?.map((svc: any) => ({
+        name: svc.metadata?.name || 'unknown',
+        namespace: svc.metadata?.namespace || 'default',
+        type: svc.spec?.type || 'ClusterIP',
+        clusterIP: svc.spec?.clusterIP || '',
+        externalIP: svc.status?.loadBalancer?.ingress?.[0]?.ip || svc.status?.loadBalancer?.ingress?.[0]?.hostname,
+        ports: (svc.spec?.ports || []).map((p: any) => `${p.port}:${p.targetPort}/${p.protocol || 'TCP'}`).join(', '),
+        age: calculateAge(svc.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const ingresses = ingressesData.items?.map((ing: any) => ({
+        name: ing.metadata?.name || 'unknown',
+        namespace: ing.metadata?.namespace || 'default',
+        hosts: ing.spec?.rules?.map((rule: any) => rule.host) || [],
+        tls: (ing.spec?.tls || []).length > 0,
+        age: calculateAge(ing.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+
+      // Process configuration resources
+      const configMapsList = configMapsData.items?.map((cm: any) => ({
+        name: cm.metadata?.name || 'unknown',
+        namespace: cm.metadata?.namespace || 'default',
+        dataCount: Object.keys(cm.data || {}).length,
+        age: calculateAge(cm.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+      
+      const secretsList = secretsData.items?.map((secret: any) => ({
+        name: secret.metadata?.name || 'unknown',
+        namespace: secret.metadata?.namespace || 'default',
+        type: secret.type || 'Opaque',
+        dataCount: Object.keys(secret.data || {}).length,
+        age: calculateAge(secret.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+
+      // Process PVCs
+      const persistentVolumeClaims = pvcsData.items?.map((pvc: any) => ({
+        name: pvc.metadata?.name || 'unknown',
+        namespace: pvc.metadata?.namespace || 'default',
+        status: pvc.status?.phase || 'Pending',
+        volume: pvc.spec?.volumeName || '-',
+        capacity: pvc.status?.capacity?.storage || pvc.spec?.resources?.requests?.storage || '-',
+        accessModes: (pvc.spec?.accessModes || []).join(', '),
+        storageClass: pvc.spec?.storageClassName || 'default',
+        age: calculateAge(pvc.metadata?.creationTimestamp),
+        selected: false
+      })) || [];
+
+      // Helper function to calculate age string
+      function calculateAge(timestamp: string): string {
+        if (!timestamp) return 'N/A';
+        const creationTime = new Date(timestamp);
+        const now = new Date();
+        const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+        return diffInDays > 0 ? `${diffInDays}d` : 'New';
+      }
+      
+      // Helper function to calculate duration
+      function calculateDuration(start: string, end: string): string {
+        const startTime = new Date(start).getTime();
+        const endTime = new Date(end).getTime();
+        const diffInSeconds = Math.floor((endTime - startTime) / 1000);
+        
+        if (diffInSeconds < 60) return `${diffInSeconds}s`;
+        if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m`;
+        return `${Math.floor(diffInSeconds / 3600)}h ${Math.floor((diffInSeconds % 3600) / 60)}m`;
+      }
+
       // Set all resources following standard Kubernetes organization
       setNamespaces(namespacesData);
       setNodes(nodesData);
       setPods(podsData);
       setPersistentVolumes(pvsData);
+      
+      // Set the workload and networking resources in state
+      setDeployments(deployments);
+      setReplicaSets(replicaSets);
+      setStatefulSets(statefulSets);
+      setDaemonSets(daemonSets);
+      setJobs(jobs);
+      setCronJobs(cronJobs);
+      setServices(services);
+      setIngresses(ingresses);
+      setConfigMaps(configMapsList);
+      setSecrets(secretsList);
+      setPersistentVolumeClaims(persistentVolumeClaims);
 
       toast.success("Resources loaded successfully");
       setStatus('idle');
@@ -361,16 +646,83 @@ const MigrationWizard = () => {
         break;
       case 'pods':
         const updatedPods = pods.map(p => 
-          p.name === resource.name ? { ...p, selected } : p
+          p.name === resource.name && p.namespace === resource.namespace ? { ...p, selected } : p
         );
         setPods(updatedPods);
         break;
       case 'persistentVolumes':
-      case 'pvs': // Support alias for backward compatibility
+      case 'pvs': // Support legacy 'pvs' value for backward compatibility
         const updatedPVs = persistentVolumes.map(p => 
           p.name === resource.name ? { ...p, selected } : p
         );
         setPersistentVolumes(updatedPVs);
+        break;
+      case 'persistentVolumeClaims':
+      case 'pvcs': // Support legacy 'pvcs' value for backward compatibility
+        const updatedPVCs = persistentVolumeClaims.map(pvc => 
+          pvc.name === resource.name && pvc.namespace === resource.namespace ? { ...pvc, selected } : pvc
+        );
+        setPersistentVolumeClaims(updatedPVCs);
+        break;
+      case 'deployments':
+        const updatedDeployments = deployments.map(d => 
+          d.name === resource.name && d.namespace === resource.namespace ? { ...d, selected } : d
+        );
+        setDeployments(updatedDeployments);
+        break;
+      case 'replicaSets':
+        const updatedReplicaSets = replicaSets.map(rs => 
+          rs.name === resource.name && rs.namespace === resource.namespace ? { ...rs, selected } : rs
+        );
+        setReplicaSets(updatedReplicaSets);
+        break;
+      case 'statefulSets':
+        const updatedStatefulSets = statefulSets.map(ss => 
+          ss.name === resource.name && ss.namespace === resource.namespace ? { ...ss, selected } : ss
+        );
+        setStatefulSets(updatedStatefulSets);
+        break;
+      case 'daemonSets':
+        const updatedDaemonSets = daemonSets.map(ds => 
+          ds.name === resource.name && ds.namespace === resource.namespace ? { ...ds, selected } : ds
+        );
+        setDaemonSets(updatedDaemonSets);
+        break;
+      case 'jobs':
+        const updatedJobs = jobs.map(job => 
+          job.name === resource.name && job.namespace === resource.namespace ? { ...job, selected } : job
+        );
+        setJobs(updatedJobs);
+        break;
+      case 'cronJobs':
+        const updatedCronJobs = cronJobs.map(cj => 
+          cj.name === resource.name && cj.namespace === resource.namespace ? { ...cj, selected } : cj
+        );
+        setCronJobs(updatedCronJobs);
+        break;
+      case 'services':
+        const updatedServices = services.map(svc => 
+          svc.name === resource.name && svc.namespace === resource.namespace ? { ...svc, selected } : svc
+        );
+        setServices(updatedServices);
+        break;
+      case 'ingresses':
+        const updatedIngresses = ingresses.map(ing => 
+          ing.name === resource.name && ing.namespace === resource.namespace ? { ...ing, selected } : ing
+        );
+        setIngresses(updatedIngresses);
+        break;
+      case 'configMaps':
+        const updatedConfigMaps = configMaps.map(cm => 
+          cm.name === resource.name && cm.namespace === resource.namespace ? { ...cm, selected } : cm
+        );
+        setConfigMaps(updatedConfigMaps);
+        break;
+      case 'secrets':
+        const updatedSecrets = secrets.map(secret => 
+          secret.name === resource.name && secret.namespace === resource.namespace ? { ...secret, selected } : secret
+        );
+        setSecrets(updatedSecrets);
         break;
       default:
         console.log(`Selection change for ${resourceType} not yet implemented`);
@@ -395,6 +747,40 @@ const MigrationWizard = () => {
       case 'pvs': // Support legacy 'pvs' value for backward compatibility
         setPersistentVolumes(persistentVolumes.map(pv => ({ ...pv, selected: selectAll })));
         break;
+      case 'persistentVolumeClaims':
+      case 'pvcs': // Support legacy 'pvcs' value for backward compatibility
+        setPersistentVolumeClaims(persistentVolumeClaims.map(pvc => ({ ...pvc, selected: selectAll })));
+        break;
+      case 'deployments':
+        setDeployments(deployments.map(d => ({ ...d, selected: selectAll })));
+        break;
+      case 'replicaSets':
+        setReplicaSets(replicaSets.map(rs => ({ ...rs, selected: selectAll })));
+        break;
+      case 'statefulSets':
+        setStatefulSets(statefulSets.map(ss => ({ ...ss, selected: selectAll })));
+        break;
+      case 'daemonSets':
+        setDaemonSets(daemonSets.map(ds => ({ ...ds, selected: selectAll })));
+        break;
+      case 'jobs':
+        setJobs(jobs.map(job => ({ ...job, selected: selectAll })));
+        break;
+      case 'cronJobs':
+        setCronJobs(cronJobs.map(cj => ({ ...cj, selected: selectAll })));
+        break;
+      case 'services':
+        setServices(services.map(svc => ({ ...svc, selected: selectAll })));
+        break;
+      case 'ingresses':
+        setIngresses(ingresses.map(ing => ({ ...ing, selected: selectAll })));
+        break;
+      case 'configMaps':
+        setConfigMaps(configMaps.map(cm => ({ ...cm, selected: selectAll })));
+        break;
+      case 'secrets':
+        setSecrets(secrets.map(secret => ({ ...secret, selected: selectAll })));
+        break;
       default:
         console.log(`Select all for ${resourceType} not implemented`);
     }
@@ -407,9 +793,36 @@ const MigrationWizard = () => {
     const selectedNodes = nodes.filter(node => node.selected).length;
     const selectedPods = pods.filter(pod => pod.selected).length;
     const selectedPVs = persistentVolumes.filter(pv => pv.selected).length;
+    const selectedPVCs = persistentVolumeClaims.filter(pvc => pvc.selected).length;
     
-    const totalSelected = selectedNamespaces + selectedNodes + selectedPods + selectedPVs;
-    console.log(`Selected resources: ${selectedNamespaces} namespaces, ${selectedNodes} nodes, ${selectedPods} pods, ${selectedPVs} PVs`);
+    // Count selected workload resources
+    const selectedDeployments = deployments.filter(d => d.selected).length;
+    const selectedReplicaSets = replicaSets.filter(rs => rs.selected).length;
+    const selectedStatefulSets = statefulSets.filter(ss => ss.selected).length;
+    const selectedDaemonSets = daemonSets.filter(ds => ds.selected).length;
+    const selectedJobs = jobs.filter(job => job.selected).length;
+    const selectedCronJobs = cronJobs.filter(cj => cj.selected).length;
+    
+    // Count selected networking resources
+    const selectedServices = services.filter(svc => svc.selected).length;
+    const selectedIngresses = ingresses.filter(ing => ing.selected).length;
+    
+    // Count selected configuration resources
+    const selectedConfigMaps = configMaps.filter(cm => cm.selected).length;
+    const selectedSecrets = secrets.filter(secret => secret.selected).length;
+    
+    const totalSelected = selectedNamespaces + selectedNodes + selectedPods + selectedPVs + selectedPVCs +
+                          selectedDeployments + selectedReplicaSets + selectedStatefulSets + 
+                          selectedDaemonSets + selectedJobs + selectedCronJobs +
+                          selectedServices + selectedIngresses +
+                          selectedConfigMaps + selectedSecrets;
+    
+    console.log(`Selected resources: ${selectedNamespaces} namespaces, ${selectedNodes} nodes, ` +
+               `${selectedPods} pods, ${selectedPVs} PVs, ${selectedPVCs} PVCs, ${selectedDeployments} deployments, ` + 
+               `${selectedReplicaSets} replicaSets, ${selectedStatefulSets} statefulSets, ` +
+               `${selectedDaemonSets} daemonSets, ${selectedJobs} jobs, ${selectedCronJobs} cronJobs, ` +
+               `${selectedServices} services, ${selectedIngresses} ingresses, ` +
+               `${selectedConfigMaps} configMaps, ${selectedSecrets} secrets`);
     
     if (totalSelected === 0) {
       toast.error("Please select at least one resource to migrate");
@@ -459,17 +872,43 @@ const MigrationWizard = () => {
       const selectedNodesToMigrate = nodes.filter(node => node.selected);
       const selectedPodsToMigrate = pods.filter(pod => pod.selected);
       const selectedPVsToMigrate = persistentVolumes.filter(pv => pv.selected);
+      const selectedPVCsToMigrate = persistentVolumeClaims.filter(pvc => pvc.selected);
+      
+      // Filter workload resources to migrate
+      const selectedDeploymentsToMigrate = deployments.filter(d => d.selected);
+      const selectedReplicaSetsToMigrate = replicaSets.filter(rs => rs.selected);
+      const selectedStatefulSetsToMigrate = statefulSets.filter(ss => ss.selected);
+      const selectedDaemonSetsToMigrate = daemonSets.filter(ds => ds.selected);
+      const selectedJobsToMigrate = jobs.filter(job => job.selected);
+      const selectedCronJobsToMigrate = cronJobs.filter(cj => cj.selected);
+      
+      // Filter networking resources to migrate
+      const selectedServicesToMigrate = services.filter(svc => svc.selected);
+      const selectedIngressesToMigrate = ingresses.filter(ing => ing.selected);
+      
+      // Filter configuration resources to migrate
+      const selectedConfigMapsToMigrate = configMaps.filter(cm => cm.selected);
+      const selectedSecretsToMigrate = secrets.filter(secret => secret.selected);
       
       // Count total selected resources across all types
       const totalSelected = selectedNamespacesToMigrate.length + selectedNodesToMigrate.length + 
-                           selectedPodsToMigrate.length + selectedPVsToMigrate.length;
+                           selectedPodsToMigrate.length + selectedPVsToMigrate.length + selectedPVCsToMigrate.length +
+                           selectedDeploymentsToMigrate.length + selectedReplicaSetsToMigrate.length +
+                           selectedStatefulSetsToMigrate.length + selectedDaemonSetsToMigrate.length +
+                           selectedJobsToMigrate.length + selectedCronJobsToMigrate.length +
+                           selectedServicesToMigrate.length + selectedIngressesToMigrate.length +
+                           selectedConfigMapsToMigrate.length + selectedSecretsToMigrate.length;
       
-      console.log(`Selected for migration: ${selectedNamespacesToMigrate.length} namespaces, ${selectedNodesToMigrate.length} nodes, ${selectedPodsToMigrate.length} pods, ${selectedPVsToMigrate.length} PVs`);
+      console.log(`Selected for migration: ${selectedNamespacesToMigrate.length} namespaces, ${selectedNodesToMigrate.length} nodes, ` +
+                 `${selectedPodsToMigrate.length} pods, ${selectedPVsToMigrate.length} PVs, ${selectedPVCsToMigrate.length} PVCs, ` +
+                 `${selectedDeploymentsToMigrate.length} deployments, ${selectedReplicaSetsToMigrate.length} replicaSets, ` +
+                 `${selectedStatefulSetsToMigrate.length} statefulSets, ${selectedDaemonSetsToMigrate.length} daemonSets, ` +
+                 `${selectedJobsToMigrate.length} jobs, ${selectedCronJobsToMigrate.length} cronJobs, ` +
+                 `${selectedServicesToMigrate.length} services, ${selectedIngressesToMigrate.length} ingresses, ` +
+                 `${selectedConfigMapsToMigrate.length} configMaps, ${selectedSecretsToMigrate.length} secrets`);
       
-      // We shouldn't need this check since the button is disabled if nothing is selected,
-      // but keeping it as a safety measure
       if (totalSelected === 0) {
-        toast.error("No resources selected for migration");
+        toast.error("Please select at least one resource to migrate");
         setStatus('idle');
         return;
       }
@@ -499,6 +938,72 @@ const MigrationWizard = () => {
           kind: 'PersistentVolume', // FIXED: Was incorrectly set to 'PersistentVolumeClaim'
           namespace: '', // FIXED: PVs are cluster-scoped resources, not namespaced
           name: pv.name
+        })),
+        // Include persistent volume claims
+        ...selectedPVCsToMigrate.map(pvc => ({
+          kind: 'PersistentVolumeClaim',
+          namespace: pvc.namespace || 'default',
+          name: pvc.name
+        })),
+        // Include deployments
+        ...selectedDeploymentsToMigrate.map(deployment => ({
+          kind: 'Deployment',
+          namespace: deployment.namespace || 'default',
+          name: deployment.name
+        })),
+        // Include replica sets
+        ...selectedReplicaSetsToMigrate.map(rs => ({
+          kind: 'ReplicaSet',
+          namespace: rs.namespace || 'default',
+          name: rs.name
+        })),
+        // Include stateful sets
+        ...selectedStatefulSetsToMigrate.map(ss => ({
+          kind: 'StatefulSet',
+          namespace: ss.namespace || 'default',
+          name: ss.name
+        })),
+        // Include daemon sets
+        ...selectedDaemonSetsToMigrate.map(ds => ({
+          kind: 'DaemonSet',
+          namespace: ds.namespace || 'default',
+          name: ds.name
+        })),
+        // Include jobs
+        ...selectedJobsToMigrate.map(job => ({
+          kind: 'Job',
+          namespace: job.namespace || 'default',
+          name: job.name
+        })),
+        // Include cron jobs
+        ...selectedCronJobsToMigrate.map(cj => ({
+          kind: 'CronJob',
+          namespace: cj.namespace || 'default',
+          name: cj.name
+        })),
+        // Include services
+        ...selectedServicesToMigrate.map(svc => ({
+          kind: 'Service',
+          namespace: svc.namespace || 'default',
+          name: svc.name
+        })),
+        // Include ingresses
+        ...selectedIngressesToMigrate.map(ing => ({
+          kind: 'Ingress',
+          namespace: ing.namespace || 'default',
+          name: ing.name
+        })),
+        // Include configMaps
+        ...selectedConfigMapsToMigrate.map(cm => ({
+          kind: 'ConfigMap',
+          namespace: cm.namespace || 'default',
+          name: cm.name
+        })),
+        // Include secrets
+        ...selectedSecretsToMigrate.map(secret => ({
+          kind: 'Secret',
+          namespace: secret.namespace || 'default',
+          name: secret.name
         }))
       ];
       
@@ -815,15 +1320,26 @@ const MigrationWizard = () => {
         return (
           <div className="space-y-6 py-4">
             <ResourceInventory
-              namespaces={namespaces as any} // Type assertion to resolve interface mismatch
+              namespaces={namespaces}
               nodes={nodes}
               pods={pods}
+              deployments={deployments}
+              replicaSets={replicaSets}
+              statefulSets={statefulSets}
+              daemonSets={daemonSets}
+              jobs={jobs}
+              cronJobs={cronJobs}
+              services={services}
+              ingresses={ingresses}
+              configMaps={configMaps}
+              secrets={secrets}
               persistentVolumes={persistentVolumes}
+              persistentVolumeClaims={persistentVolumeClaims}
+              sourceCluster={sourceCluster}
+              isLoading={loadingResources}
+              loadResources={loadResources}
               onResourceSelectionChange={handleResourceSelectionChange}
               onSelectAll={handleSelectAll}
-              loadResources={loadResources}
-              isLoading={loadingResources}
-              sourceCluster={sourceCluster}
             />
             
             {error && (

@@ -952,7 +952,45 @@ const ClusterDetails = () => {
     
     setIsLoadingWorkloads(true);
     
-    // Fetch each workload type separately with individual error handling
+    // Check if we already have workload data from liveClusterStatus
+    if (liveClusterStatus?.fullClusterDetails?.workloads) {
+      console.log('Using workload data from liveClusterStatus instead of fetching again');
+      
+      // Just for the selected namespace, filter workloads by namespace
+      const filterByNamespace = (items: any[]) => {
+        return items.filter(item => item.namespace === namespace || namespace === 'all');
+      };
+      
+      // Use the data from liveClusterStatus
+      if (liveClusterStatus.fullClusterDetails.workloads.deployments) {
+        setDeployments(filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.deployments));
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.replicaSets) {
+        setReplicaSets(filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.replicaSets));
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.statefulSets) {
+        setStatefulSets(filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.statefulSets));
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.daemonSets) {
+        setDaemonSets(filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.daemonSets));
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.jobs) {
+        setJobs(filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.jobs));
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.cronJobs) {
+        setCronJobs(filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.cronJobs));
+      }
+      
+      setIsLoadingWorkloads(false);
+      return;
+    }
+    
+    // If no data in liveClusterStatus, fetch each workload type separately with individual error handling
     
     // Fetch pods
     try {
@@ -1763,6 +1801,71 @@ const ClusterDetails = () => {
     }
   }, [user, cluster, activeTab, targetCluster]);
 
+  // Add this useEffect after the other useEffects
+  // Find the section near the beginning of the component where other useEffects are declared
+  useEffect(() => {
+    if (liveClusterStatus?.fullClusterDetails?.workloads) {
+      console.log('Workloads data in liveClusterStatus:', liveClusterStatus.fullClusterDetails.workloads);
+      console.log('Deployments count:', liveClusterStatus.fullClusterDetails.workloads.deployments?.length || 0);
+      console.log('ReplicaSets count:', liveClusterStatus.fullClusterDetails.workloads.replicaSets?.length || 0);
+      console.log('StatefulSets count:', liveClusterStatus.fullClusterDetails.workloads.statefulSets?.length || 0);
+      console.log('DaemonSets count:', liveClusterStatus.fullClusterDetails.workloads.daemonSets?.length || 0);
+      console.log('Jobs count:', liveClusterStatus.fullClusterDetails.workloads.jobs?.length || 0);
+      console.log('CronJobs count:', liveClusterStatus.fullClusterDetails.workloads.cronJobs?.length || 0);
+      
+      // Add more detailed logging to check what's actually in the deployments data
+      if (liveClusterStatus.fullClusterDetails.workloads.deployments?.length > 0) {
+        console.log('Sample deployment data:', liveClusterStatus.fullClusterDetails.workloads.deployments[0]);
+      }
+      
+      // The rest of the useEffect remains the same...
+      console.log('Updating workloads state from liveClusterStatus');
+      
+      // Filter for current namespace or use all data if no namespace selected
+      const currentNamespace = selectedNamespace || 'all';
+      const filterByNamespace = (items: any[]) => {
+        return currentNamespace === 'all' ? items : items.filter(item => item.namespace === currentNamespace);
+      };
+      
+      // Update all workload state variables with data from liveClusterStatus
+      if (liveClusterStatus.fullClusterDetails.workloads.deployments) {
+        const filtered = filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.deployments);
+        console.log(`Setting ${filtered.length} deployments after filtering for namespace ${currentNamespace}`);
+        setDeployments(filtered);
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.replicaSets) {
+        const filtered = filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.replicaSets);
+        console.log(`Setting ${filtered.length} replicaSets after filtering for namespace ${currentNamespace}`);
+        setReplicaSets(filtered);
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.statefulSets) {
+        const filtered = filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.statefulSets);
+        console.log(`Setting ${filtered.length} statefulSets after filtering for namespace ${currentNamespace}`);
+        setStatefulSets(filtered);
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.daemonSets) {
+        const filtered = filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.daemonSets);
+        console.log(`Setting ${filtered.length} daemonSets after filtering for namespace ${currentNamespace}`);
+        setDaemonSets(filtered);
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.jobs) {
+        const filtered = filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.jobs);
+        console.log(`Setting ${filtered.length} jobs after filtering for namespace ${currentNamespace}`);
+        setJobs(filtered);
+      }
+      
+      if (liveClusterStatus.fullClusterDetails.workloads.cronJobs) {
+        const filtered = filterByNamespace(liveClusterStatus.fullClusterDetails.workloads.cronJobs);
+        console.log(`Setting ${filtered.length} cronJobs after filtering for namespace ${currentNamespace}`);
+        setCronJobs(filtered);
+      }
+    }
+  }, [liveClusterStatus, selectedNamespace]);
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -2202,18 +2305,26 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {deployments.map((deployment: any) => (
+                                        {liveClusterStatus?.fullClusterDetails?.workloads?.deployments?.map((deployment: any) => (
                                           <tr key={`${deployment.namespace}-${deployment.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{deployment.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.namespace}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {deployment.replicas.current}/{deployment.replicas.desired}
+                                              {deployment.replicas ? 
+                                                `${deployment.replicas.current || 0}/${deployment.replicas.desired || 0}` : 
+                                                `${deployment.status?.replicas || 0}/${deployment.spec?.replicas || 0}`}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {deployment.replicas.available}/{deployment.replicas.desired}
+                                              {deployment.replicas ? 
+                                                `${deployment.replicas.available || 0}/${deployment.replicas.desired || 0}` : 
+                                                `${deployment.status?.availableReplicas || 0}/${deployment.spec?.replicas || 0}`}
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.strategy}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.age}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {deployment.strategy || deployment.spec?.strategy?.type || 'RollingUpdate'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {formatDate(deployment.creationTimestamp || deployment.metadata?.creationTimestamp || new Date().toISOString())}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -2235,14 +2346,22 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {replicaSets.map((rs: any) => (
+                                        {liveClusterStatus?.fullClusterDetails?.workloads?.replicaSets?.map((rs: any) => (
                                           <tr key={`${rs.namespace}-${rs.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{rs.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.namespace}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.replicas.desired}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.replicas.current}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.ownerReference || '-'}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.age}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {rs.replicas?.desired || rs.spec?.replicas || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {rs.replicas?.current || rs.status?.replicas || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {rs.ownerReference || rs.metadata?.ownerReferences?.[0]?.name || '-'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {formatDate(rs.creationTimestamp || rs.metadata?.creationTimestamp || new Date().toISOString())}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -2264,16 +2383,24 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {statefulSets.map((sts: any) => (
+                                        {liveClusterStatus?.fullClusterDetails?.workloads?.statefulSets?.map((sts: any) => (
                                           <tr key={`${sts.namespace}-${sts.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sts.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.namespace}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {sts.replicas.current}/{sts.replicas.desired}
+                                              {sts.replicas ? 
+                                                `${sts.replicas.current || 0}/${sts.replicas.desired || 0}` : 
+                                                `${sts.status?.replicas || 0}/${sts.spec?.replicas || 0}`}
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.serviceName}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.updateStrategy}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.age}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {sts.serviceName || sts.spec?.serviceName || '-'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {sts.updateStrategy || sts.spec?.updateStrategy?.type || 'RollingUpdate'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {formatDate(sts.creationTimestamp || sts.metadata?.creationTimestamp || new Date().toISOString())}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -2296,15 +2423,25 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {daemonSets.map((ds: any) => (
+                                        {liveClusterStatus?.fullClusterDetails?.workloads?.daemonSets?.map((ds: any) => (
                                           <tr key={`${ds.namespace}-${ds.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ds.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.namespace}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.desiredNumberScheduled}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.currentNumberScheduled}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.numberReady}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.updateStrategy}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.age}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {ds.desiredNumberScheduled || ds.status?.desiredNumberScheduled || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {ds.currentNumberScheduled || ds.status?.currentNumberScheduled || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {ds.numberReady || ds.status?.numberReady || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {ds.updateStrategy || ds.spec?.updateStrategy?.type || 'RollingUpdate'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {formatDate(ds.creationTimestamp || ds.metadata?.creationTimestamp || new Date().toISOString())}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -2327,15 +2464,25 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {jobs.map((job: any) => (
+                                        {liveClusterStatus?.fullClusterDetails?.workloads?.jobs?.map((job: any) => (
                                           <tr key={`${job.namespace}-${job.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{job.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.namespace}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.completions}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.active}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.succeeded}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.failed}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.age}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {job.completions || job.spec?.completions || 1}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {job.active || job.status?.active || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {job.succeeded || job.status?.succeeded || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {job.failed || job.status?.failed || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {formatDate(job.creationTimestamp || job.metadata?.creationTimestamp || new Date().toISOString())}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -2358,17 +2505,26 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {cronJobs.map((cj: any) => (
+                                        {liveClusterStatus?.fullClusterDetails?.workloads?.cronJobs?.map((cj: any) => (
                                           <tr key={`${cj.namespace}-${cj.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cj.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.namespace}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.schedule}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {cj.suspend ? 'Yes' : 'No'}
+                                              {cj.schedule || cj.spec?.schedule || '-'}
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.active}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.lastScheduleTime || '-'}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.age}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {(cj.suspend || cj.spec?.suspend) ? 'Yes' : 'No'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {cj.active || cj.status?.active?.length || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {cj.lastScheduleTime ? formatDate(cj.lastScheduleTime) : 
+                                               cj.status?.lastScheduleTime ? formatDate(cj.status.lastScheduleTime) : 'Never'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                              {formatDate(cj.creationTimestamp || cj.metadata?.creationTimestamp || new Date().toISOString())}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -3197,7 +3353,9 @@ const ClusterDetails = () => {
                                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{deployment.name}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.namespace}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {deployment.replicas.current}/{deployment.replicas.desired}
+                                            {deployment.replicas ? 
+                                              `${deployment.replicas.current || 0}/${deployment.replicas.desired || 0}` : 
+                                              `${deployment.status?.replicas || 0}/${deployment.spec?.replicas || 0}`}
                                           </td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.age}</td>
                                         </tr>
@@ -3213,7 +3371,9 @@ const ClusterDetails = () => {
                                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sts.name}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.namespace}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {sts.replicas.current}/{sts.replicas.desired}
+                                            {sts.replicas ? 
+                                              `${sts.replicas.current || 0}/${sts.replicas.desired || 0}` : 
+                                              `${sts.status?.replicas || 0}/${sts.spec?.replicas || 0}`}
                                           </td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.age}</td>
                                         </tr>
@@ -3229,7 +3389,7 @@ const ClusterDetails = () => {
                                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ds.name}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.namespace}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {ds.desiredNumberScheduled}
+                                            {ds.desiredNumberScheduled || ds.status?.desiredNumberScheduled || 0}
                                           </td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.age}</td>
                                         </tr>

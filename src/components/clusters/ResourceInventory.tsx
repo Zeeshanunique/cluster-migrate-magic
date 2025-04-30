@@ -98,6 +98,15 @@ interface Secret extends KubernetesResource {
   age: string;
 }
 
+interface PersistentVolumeClaim extends KubernetesResource {
+  status: string;
+  volume: string;
+  capacity: string;
+  accessModes: string;
+  storageClass: string;
+  age: string;
+}
+
 interface ResourceInventoryProps {
   // Core resources
   namespaces?: Namespace[];
@@ -122,7 +131,7 @@ interface ResourceInventoryProps {
   
   // Storage
   persistentVolumes?: SelectableEKSPVInfo[];
-  persistentVolumeClaims?: any[];
+  persistentVolumeClaims?: PersistentVolumeClaim[];
   
   // Additional props
   sourceCluster?: any;
@@ -668,6 +677,357 @@ const ResourceInventory: React.FC<ResourceInventoryProps> = ({
                     </Table>
                   </ScrollArea>
                 </TabsContent>
+                
+                {/* StatefulSets Tab */}
+                <TabsContent value="statefulSets" className="mt-2">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('statefulSets', true)}
+                        disabled={statefulSets.length === 0}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('statefulSets', false)}
+                        disabled={selectedCounts.statefulSets === 0}
+                        className="ml-2"
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedCounts.statefulSets} of {statefulSets.length} StatefulSets selected
+                    </div>
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">Select</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Namespace</TableHead>
+                          <TableHead>Replicas</TableHead>
+                          <TableHead>Ready Replicas</TableHead>
+                          <TableHead>Service Name</TableHead>
+                          <TableHead>Age</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {statefulSets.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground">
+                              No StatefulSets found
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          statefulSets.map((statefulSet) => (
+                            <TableRow key={`${statefulSet.namespace}-${statefulSet.name}`}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={statefulSet.selected}
+                                  onCheckedChange={(checked) => 
+                                    onResourceSelectionChange('statefulSets', statefulSet, !!checked)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{statefulSet.name}</TableCell>
+                              <TableCell>{statefulSet.namespace}</TableCell>
+                              <TableCell>{statefulSet.replicas}</TableCell>
+                              <TableCell>{statefulSet.readyReplicas}</TableCell>
+                              <TableCell>{statefulSet.serviceName}</TableCell>
+                              <TableCell>{statefulSet.age}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </TabsContent>
+                
+                {/* DaemonSets Tab */}
+                <TabsContent value="daemonSets" className="mt-2">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('daemonSets', true)}
+                        disabled={daemonSets.length === 0}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('daemonSets', false)}
+                        disabled={selectedCounts.daemonSets === 0}
+                        className="ml-2"
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedCounts.daemonSets} of {daemonSets.length} DaemonSets selected
+                    </div>
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">Select</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Namespace</TableHead>
+                          <TableHead>Desired</TableHead>
+                          <TableHead>Current</TableHead>
+                          <TableHead>Ready</TableHead>
+                          <TableHead>Age</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {daemonSets.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground">
+                              No DaemonSets found
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          daemonSets.map((daemonSet) => (
+                            <TableRow key={`${daemonSet.namespace}-${daemonSet.name}`}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={daemonSet.selected}
+                                  onCheckedChange={(checked) => 
+                                    onResourceSelectionChange('daemonSets', daemonSet, !!checked)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{daemonSet.name}</TableCell>
+                              <TableCell>{daemonSet.namespace}</TableCell>
+                              <TableCell>{daemonSet.desired}</TableCell>
+                              <TableCell>{daemonSet.current}</TableCell>
+                              <TableCell>{daemonSet.ready}</TableCell>
+                              <TableCell>{daemonSet.age}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </TabsContent>
+                
+                {/* ReplicaSets Tab */}
+                <TabsContent value="replicaSets" className="mt-2">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('replicaSets', true)}
+                        disabled={replicaSets.length === 0}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('replicaSets', false)}
+                        disabled={selectedCounts.replicaSets === 0}
+                        className="ml-2"
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedCounts.replicaSets} of {replicaSets.length} ReplicaSets selected
+                    </div>
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">Select</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Namespace</TableHead>
+                          <TableHead>Desired</TableHead>
+                          <TableHead>Current</TableHead>
+                          <TableHead>Ready</TableHead>
+                          <TableHead>Age</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {replicaSets.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground">
+                              No ReplicaSets found
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          replicaSets.map((replicaSet) => (
+                            <TableRow key={`${replicaSet.namespace}-${replicaSet.name}`}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={replicaSet.selected}
+                                  onCheckedChange={(checked) => 
+                                    onResourceSelectionChange('replicaSets', replicaSet, !!checked)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{replicaSet.name}</TableCell>
+                              <TableCell>{replicaSet.namespace}</TableCell>
+                              <TableCell>{replicaSet.desired}</TableCell>
+                              <TableCell>{replicaSet.current}</TableCell>
+                              <TableCell>{replicaSet.ready}</TableCell>
+                              <TableCell>{replicaSet.age}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </TabsContent>
+                
+                {/* Jobs Tab */}
+                <TabsContent value="jobs" className="mt-2">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('jobs', true)}
+                        disabled={jobs.length === 0}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('jobs', false)}
+                        disabled={selectedCounts.jobs === 0}
+                        className="ml-2"
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedCounts.jobs} of {jobs.length} Jobs selected
+                    </div>
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">Select</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Namespace</TableHead>
+                          <TableHead>Completions</TableHead>
+                          <TableHead>Duration</TableHead>
+                          <TableHead>Age</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {jobs.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="text-center text-muted-foreground">
+                              No Jobs found
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          jobs.map((job) => (
+                            <TableRow key={`${job.namespace}-${job.name}`}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={job.selected}
+                                  onCheckedChange={(checked) => 
+                                    onResourceSelectionChange('jobs', job, !!checked)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{job.name}</TableCell>
+                              <TableCell>{job.namespace}</TableCell>
+                              <TableCell>{job.completions}</TableCell>
+                              <TableCell>{job.duration}</TableCell>
+                              <TableCell>{job.age}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </TabsContent>
+                
+                {/* CronJobs Tab */}
+                <TabsContent value="cronJobs" className="mt-2">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('cronJobs', true)}
+                        disabled={cronJobs.length === 0}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('cronJobs', false)}
+                        disabled={selectedCounts.cronJobs === 0}
+                        className="ml-2"
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedCounts.cronJobs} of {cronJobs.length} CronJobs selected
+                    </div>
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">Select</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Namespace</TableHead>
+                          <TableHead>Schedule</TableHead>
+                          <TableHead>Last Schedule</TableHead>
+                          <TableHead>Age</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {cronJobs.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="text-center text-muted-foreground">
+                              No CronJobs found
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          cronJobs.map((cronJob) => (
+                            <TableRow key={`${cronJob.namespace}-${cronJob.name}`}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={cronJob.selected}
+                                  onCheckedChange={(checked) => 
+                                    onResourceSelectionChange('cronJobs', cronJob, !!checked)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{cronJob.name}</TableCell>
+                              <TableCell>{cronJob.namespace}</TableCell>
+                              <TableCell>{cronJob.schedule}</TableCell>
+                              <TableCell>{cronJob.lastSchedule}</TableCell>
+                              <TableCell>{cronJob.age}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </TabsContent>
               </Tabs>
             </TabsContent>
             
@@ -1098,6 +1458,84 @@ const ResourceInventory: React.FC<ResourceInventoryProps> = ({
                                 </Badge>
                               </TableCell>
                               <TableCell>{pv.claim || '-'}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </TabsContent>
+                
+                {/* PersistentVolumeClaims Tab */}
+                <TabsContent value="persistentVolumeClaims" className="mt-2">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('persistentVolumeClaims', true)}
+                        disabled={persistentVolumeClaims.length === 0}
+                      >
+                        Select All
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAll('persistentVolumeClaims', false)}
+                        disabled={selectedCounts.persistentVolumeClaims === 0}
+                        className="ml-2"
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedCounts.persistentVolumeClaims} of {persistentVolumeClaims.length} claims selected
+                    </div>
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">Select</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Namespace</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Volume</TableHead>
+                          <TableHead>Capacity</TableHead>
+                          <TableHead>Access Modes</TableHead>
+                          <TableHead>Storage Class</TableHead>
+                          <TableHead>Age</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {persistentVolumeClaims.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={9} className="text-center text-muted-foreground">
+                              No persistent volume claims found
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          persistentVolumeClaims.map((pvc) => (
+                            <TableRow key={`${pvc.namespace}-${pvc.name}`}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={pvc.selected}
+                                  onCheckedChange={(checked) => 
+                                    onResourceSelectionChange('persistentVolumeClaims', pvc, !!checked)}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{pvc.name}</TableCell>
+                              <TableCell>{pvc.namespace}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={getStatusColor(pvc.status)}>
+                                  {pvc.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{pvc.volume}</TableCell>
+                              <TableCell>{pvc.capacity}</TableCell>
+                              <TableCell>{pvc.accessModes}</TableCell>
+                              <TableCell>{pvc.storageClass}</TableCell>
+                              <TableCell>{pvc.age}</TableCell>
                             </TableRow>
                           ))
                         )}

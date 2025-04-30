@@ -1,39 +1,11 @@
 import { toast } from 'sonner';
 import YAML from 'yaml';
 import { Base64 } from 'js-base64';
-import { KUBERNETES_API, apiRequest } from './api';
 
 // Proxy configuration
 const API_PROXY_URL = import.meta.env.VITE_API_PROXY_URL || 'http://localhost:3001';
 
-// Interfaces for Kubernetes resources using standard K8s hierarchy
-
-// Core cluster structure to organize all K8s resources
-interface KubernetesCluster {
-  clusterName: string;
-  provider: 'EKS' | 'GKE' | 'AKS' | 'generic' | string;
-  namespaces: KubernetesNamespace[];
-  nodes: KubernetesNode[];
-  workloads: KubernetesWorkloads;
-  networking: KubernetesNetworking;
-  configurations: KubernetesConfigurations;
-  storage: KubernetesStorage;
-  clusterInfo: KubernetesClusterInfo;
-  monitoring: KubernetesMonitoring;
-  timestamp: string;
-  healthStatus: 'healthy' | 'degraded' | 'critical';
-}
-
-// Namespaces section
-interface KubernetesNamespace {
-  name: string;
-  status: string;
-  labels?: Record<string, string>;
-  annotations?: Record<string, string>;
-  creationTimestamp: string;
-}
-
-// Nodes section
+// Interfaces for Kubernetes resources
 interface KubernetesNode {
   name: string;
   status: string;
@@ -51,23 +23,6 @@ interface KubernetesNode {
     percent: number;
   };
   creationTimestamp: string;
-  labels?: Record<string, string>;
-  taints?: {
-    key: string;
-    value: string;
-    effect: string;
-  }[];
-}
-
-// Workloads section
-interface KubernetesWorkloads {
-  pods: KubernetesPod[];
-  deployments: KubernetesDeployment[];
-  replicaSets: KubernetesReplicaSet[];
-  statefulSets: KubernetesStatefulSet[];
-  daemonSets: KubernetesDaemonSet[];
-  jobs: KubernetesJob[];
-  cronJobs: KubernetesCronJob[];
 }
 
 interface KubernetesPod {
@@ -78,273 +33,21 @@ interface KubernetesPod {
   node: string;
   age: string;
   creationTimestamp: string;
-  labels?: Record<string, string>;
-  containers?: {
-    name: string;
-    image: string;
-    ready: boolean;
-    restarts: number;
-    state: string;
-  }[];
 }
 
-interface KubernetesDeployment {
-  name: string;
-  namespace: string;
-  replicas: {
-    desired: number;
-    current: number;
-    ready: number;
-    available: number;
-  };
-  strategy: string;
-  conditions: {
-    type: string;
-    status: string;
-    reason?: string;
-  }[];
-  creationTimestamp: string;
-  selector?: Record<string, string>;
-}
-
-interface KubernetesReplicaSet {
-  name: string;
-  namespace: string;
-  replicas: {
-    desired: number;
-    current: number;
-  };
-  creationTimestamp: string;
-  labels?: Record<string, string>;
-  ownerReference?: string;
-}
-
-interface KubernetesStatefulSet {
-  name: string;
-  namespace: string;
-  replicas: {
-    desired: number;
-    current: number;
-  };
-  serviceName: string;
-  updateStrategy: string;
-  creationTimestamp: string;
-}
-
-interface KubernetesDaemonSet {
-  name: string;
-  namespace: string;
-  desiredNumberScheduled: number;
-  currentNumberScheduled: number;
-  numberReady: number;
-  updateStrategy: string;
-  creationTimestamp: string;
-}
-
-interface KubernetesJob {
-  name: string;
-  namespace: string;
-  completions: number;
-  parallelism: number;
-  active: number;
-  succeeded: number;
-  failed: number;
-  creationTimestamp: string;
-}
-
-interface KubernetesCronJob {
-  name: string;
-  namespace: string;
-  schedule: string;
-  suspend: boolean;
-  active: number;
-  lastScheduleTime?: string;
-  creationTimestamp: string;
-}
-
-// Networking section
-interface KubernetesNetworking {
-  services: KubernetesService[];
-  ingresses: KubernetesIngress[];
-}
-
-interface KubernetesService {
-  name: string;
-  namespace: string;
-  type: 'ClusterIP' | 'NodePort' | 'LoadBalancer' | 'ExternalName';
-  clusterIP: string;
-  externalIP?: string;
-  ports: {
-    name?: string;
-    port: number;
-    targetPort: number | string;
-    nodePort?: number;
-    protocol: 'TCP' | 'UDP' | 'SCTP';
-  }[];
-  selector?: Record<string, string>;
-  creationTimestamp: string;
-}
-
-interface KubernetesIngress {
-  name: string;
-  namespace: string;
-  className?: string;
-  hosts: string[];
-  tls?: {
-    hosts: string[];
-    secretName?: string;
-  }[];
-  rules: {
-    host?: string;
-    paths: {
-      path: string;
-      pathType: string;
-      serviceName: string;
-      servicePort: number | string;
-    }[];
-  }[];
-  creationTimestamp: string;
-}
-
-// Configurations section
-interface KubernetesConfigurations {
-  configMaps: KubernetesConfigMap[];
-  secrets: KubernetesSecret[];
-  resourceQuotas: KubernetesResourceQuota[];
-  limitRanges: KubernetesLimitRange[];
-}
-
-interface KubernetesConfigMap {
-  name: string;
-  namespace: string;
-  data: Record<string, string>;
-  creationTimestamp: string;
-}
-
-interface KubernetesSecret {
-  name: string;
-  namespace: string;
-  type: string;
-  dataCount: number; // Number of keys, not the actual data for security reasons
-  creationTimestamp: string;
-}
-
-interface KubernetesResourceQuota {
-  name: string;
-  namespace: string;
-  hard: Record<string, string>;
-  used: Record<string, string>;
-  creationTimestamp: string;
-}
-
-interface KubernetesLimitRange {
-  name: string;
-  namespace: string;
-  limits: {
-    type: string;
-    max?: Record<string, string>;
-    min?: Record<string, string>;
-    default?: Record<string, string>;
-    defaultRequest?: Record<string, string>;
-  }[];
-  creationTimestamp: string;
-}
-
-// Storage section
-interface KubernetesStorage {
-  persistentVolumes: KubernetesPersistentVolume[];
-  persistentVolumeClaims: KubernetesPersistentVolumeClaim[];
-  storageClasses: KubernetesStorageClass[];
-}
-
-interface KubernetesPersistentVolume {
-  name: string;
-  capacity: string;
-  accessModes: string[];
-  reclaimPolicy: string;
-  status: string;
-  claim?: string;
-  storageClass: string;
-  creationTimestamp: string;
-}
-
-interface KubernetesPersistentVolumeClaim {
-  name: string;
-  namespace: string;
-  status: string;
-  volume: string;
-  capacity: string;
-  accessModes: string[];
-  storageClass: string;
-  creationTimestamp: string;
-}
-
-interface KubernetesStorageClass {
-  name: string;
-  provisioner: string;
-  reclaimPolicy: string;
-  volumeBindingMode: string;
-  isDefault: boolean;
-  creationTimestamp: string;
-}
-
-// Cluster Info section
-interface KubernetesClusterInfo {
-  version: string;
-  apiServer: string;
-  kubelet: string;
-  scheduler: string;
-  controllerManager: string;
-  etcd: string;
-  coreDNS: string;
-  architecture: string;
-  authInfo: {
-    type: string;
-    provider?: string;
-  };
-  region?: string; // Cloud provider specific
-  accountId?: string; // Cloud provider specific
-}
-
-// Monitoring & Logging section
-interface KubernetesMonitoring {
-  metricsServer: {
-    available: boolean;
-    version?: string;
-  };
-  prometheus?: {
-    available: boolean;
-    version?: string;
-    grafana?: boolean;
-  };
-  cloudWatchLogs?: {
-    enabled: boolean;
-    logGroups?: string[];
-  };
-  customTools?: {
-    name: string;
-    version?: string;
-    status: string;
-  }[];
-}
-
-// Main cluster status interface for backward compatibility
 interface KubernetesClusterStatus {
   nodes: KubernetesNode[];
   pods: KubernetesPod[];
   kubernetesVersion: string;
   timestamp: string;
   healthStatus: 'healthy' | 'degraded' | 'critical';
-  // Add a field to provide the full cluster structure if available
-  fullClusterDetails?: KubernetesCluster;
 }
 
 // Connection status tracker
 const connectionStatus = {
   isConnected: false,
   lastError: null as string | null,
-  lastConnectionTime: null as string | null,
-  lastConnectionAttemptTime: null as string | null,
+  connectTime: null as Date | null,
   clusterName: null as string | null,
 };
 
@@ -366,7 +69,7 @@ export async function checkK8sToken(kubeconfig: string): Promise<boolean> {
     }
 
     // If no environment token, check with the proxy server
-    const response = await fetch(`${API_PROXY_URL}/kube-migrate/debug/token`, {
+    const response = await fetch(`${API_PROXY_URL}/api/debug/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -395,7 +98,7 @@ export async function checkK8sToken(kubeconfig: string): Promise<boolean> {
  */
 export async function getK8sNodes(kubeconfig: string): Promise<any> {
   try {
-    const response = await fetch('http://localhost:3001/kube-migrate/k8s/nodes', {
+    const response = await fetch('http://localhost:3001/api/k8s/nodes', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -427,7 +130,7 @@ export async function getClusterInfo(kubeconfig: string): Promise<any> {
     const eksClusterName = extractEksClusterName(kubeconfig) || clusterName;
 
     // Get node info to extract version
-    const nodeResponse = await fetch(`${API_PROXY_URL}/kube-migrate/k8s/nodes`, {
+    const nodeResponse = await fetch(`${API_PROXY_URL}/api/k8s/nodes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -470,7 +173,7 @@ export async function getClusterInfo(kubeconfig: string): Promise<any> {
  */
 export async function debugKubeconfig(kubeconfig: string): Promise<any> {
   try {
-    const response = await fetch('http://localhost:3001/kube-migrate/debug/kubeconfig', {
+    const response = await fetch('http://localhost:3001/api/debug/kubeconfig', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -489,10 +192,7 @@ export async function debugKubeconfig(kubeconfig: string): Promise<any> {
   }
 }
 
-/**
- * This function gets cluster status using a server-based proxy
- * Enhanced to return structured Kubernetes resources according to standard K8s hierarchy
- */
+// This function gets cluster status using a server-based proxy
 export async function fetchClusterStatus(kubeconfig: string): Promise<KubernetesClusterStatus> {
   try {
     console.log('Using server proxy for EKS connection - LIVE DATA ONLY MODE');
@@ -548,161 +248,90 @@ export async function fetchClusterStatus(kubeconfig: string): Promise<Kubernetes
     }
     
     // Parse kubeconfig to extract cluster info
-    const { clusterName, region, endpoint } = parseKubeconfig(kubeconfig);
+    const { clusterName, region } = parseKubeconfig(kubeconfig);
     const eksClusterName = extractEksClusterName(kubeconfig) || clusterName;
-    const accountId = extractAwsAccountId(kubeconfig);
     
     console.log(`Fetching LIVE status for cluster: ${eksClusterName || 'unknown'}`);
     
-    try {
-      // Step 1: Fetch basic namespace information
-      console.log('Fetching namespaces data');
-      const namespacesData = await apiRequest(KUBERNETES_API.GET_NAMESPACES || '/api/k8s/namespaces', 'POST', { kubeconfig })
-        .catch(() => ({ items: [] })); // Provide fallback if endpoint is not available
-      
-      // Step 2: Get nodes information via proxy
-      console.log(`Fetching nodes data from ${KUBERNETES_API.GET_NODES}`);
-      const nodesData = await apiRequest(KUBERNETES_API.GET_NODES, 'POST', { kubeconfig });
-      console.log(`Retrieved ${nodesData.items?.length || 0} LIVE nodes from the cluster`);
-      
-      // Step 3: Get pods information via proxy
-      console.log(`Fetching pods data from ${KUBERNETES_API.GET_PODS}`);
-      const podsData = await apiRequest(KUBERNETES_API.GET_PODS, 'POST', { kubeconfig });
-      console.log(`Retrieved ${podsData.items?.length || 0} LIVE pods from the cluster`);
-      
-      // Step 4: Try to get service information
-      const servicesData = await apiRequest(KUBERNETES_API.GET_SERVICES || '/api/k8s/services', 'POST', { kubeconfig })
-        .catch(() => ({ items: [] })); // Provide fallback if endpoint is not available
-      
-      // Process the data for backward compatibility
-      const nodes = processNodesData(nodesData);
-      const pods = processPodsData(podsData);
-      
-      // Process namespaces data
-      const namespaces = (namespacesData.items || []).map((ns: any) => ({
-        name: ns.metadata?.name || 'unknown',
-        status: ns.status?.phase || 'Active',
-        labels: ns.metadata?.labels || {},
-        annotations: ns.metadata?.annotations || {},
-        creationTimestamp: ns.metadata?.creationTimestamp || new Date().toISOString()
-      })) as KubernetesNamespace[];
-      
-      // Process services data
-      const services = (servicesData.items || []).map((svc: any) => ({
-        name: svc.metadata?.name || 'unknown',
-        namespace: svc.metadata?.namespace || 'default',
-        type: svc.spec?.type || 'ClusterIP',
-        clusterIP: svc.spec?.clusterIP || '',
-        externalIP: svc.status?.loadBalancer?.ingress?.[0]?.ip || svc.status?.loadBalancer?.ingress?.[0]?.hostname || undefined,
-        ports: (svc.spec?.ports || []).map((port: any) => ({
-          name: port.name,
-          port: port.port,
-          targetPort: port.targetPort,
-          nodePort: port.nodePort,
-          protocol: port.protocol || 'TCP'
-        })),
-        selector: svc.spec?.selector || {},
-        creationTimestamp: svc.metadata?.creationTimestamp || new Date().toISOString()
-      })) as KubernetesService[];
-      
-      // Determine cluster health status based on node data
-      const notReadyNodes = nodes.filter(node => !node.ready).length;
-      const clusterHealth = determineClusterHealth(notReadyNodes, nodes.length);
-      const kubernetesVersion = nodes[0]?.version || 'unknown';
-      const timestamp = new Date().toISOString();
-      
-      // Build the full structured Kubernetes cluster representation
-      const fullClusterDetails: KubernetesCluster = {
-        clusterName: eksClusterName || 'unknown-cluster',
-        provider: region ? 'EKS' : 'generic',
-        namespaces,
-        nodes,
-        workloads: {
-          pods,
-          deployments: [],  // Would need additional API calls
-          replicaSets: [],  // Would need additional API calls
-          statefulSets: [], // Would need additional API calls
-          daemonSets: [],   // Would need additional API calls
-          jobs: [],         // Would need additional API calls
-          cronJobs: []      // Would need additional API calls
-        },
-        networking: {
-          services,
-          ingresses: []     // Would need additional API calls
-        },
-        configurations: {
-          configMaps: [],    // Would need additional API calls
-          secrets: [],      // Would need additional API calls
-          resourceQuotas: [],// Would need additional API calls
-          limitRanges: []   // Would need additional API calls
-        },
-        storage: {
-          persistentVolumes: [],     // Would need additional API calls
-          persistentVolumeClaims: [], // Would need additional API calls
-          storageClasses: []         // Would need additional API calls
-        },
-        clusterInfo: {
-          version: kubernetesVersion,
-          apiServer: endpoint || '',
-          kubelet: kubernetesVersion, // Simplified, actual version may differ
-          scheduler: kubernetesVersion, // Simplified, actual version may differ
-          controllerManager: kubernetesVersion, // Simplified, actual version may differ
-          etcd: 'unknown', // Would need specialized API call
-          coreDNS: 'unknown', // Would need specialized API call
-          architecture: 'x86_64', // Default assumption
-          authInfo: {
-            type: envToken ? 'token' : 'aws',
-            provider: 'aws'
-          },
-          region: region || undefined,
-          accountId: accountId || undefined
-        },
-        monitoring: {
-          metricsServer: {
-            available: false, // Would need to check specifically
-          },
-          prometheus: undefined,
-          cloudWatchLogs: region ? {
-            enabled: true, // Assume enabled for EKS
-            logGroups: [`/aws/eks/${eksClusterName}/cluster`]
-          } : undefined,
-        },
-        timestamp,
-        healthStatus: clusterHealth
-      };
-      
-      // Create the cluster status result with backward compatibility
-      const result: KubernetesClusterStatus = {
-        nodes,
-        pods,
-        kubernetesVersion,
-        timestamp,
-        healthStatus: clusterHealth,
-        // Add the full structured details for upgraded UI components
-        fullClusterDetails
-      };
-      
-      // Update connection status
-      connectionStatus.isConnected = true;
-      connectionStatus.lastError = null;
-      connectionStatus.lastConnectionTime = timestamp;
-      connectionStatus.clusterName = eksClusterName || clusterName;
-      
-      return result;
-    } catch (error) {
-      // Update connection status on error
-      connectionStatus.isConnected = false;
-      connectionStatus.lastError = (error as Error).message;
-      connectionStatus.lastConnectionAttemptTime = new Date().toISOString();
-      
-      console.error('Error fetching cluster status:', error);
-      throw error;
+    // Skip the cluster info endpoint since it doesn't exist in the proxy server
+    // We'll get all the needed information from the nodes and pods endpoints
+    
+    // Step 1: Get nodes information via proxy
+    const nodesResponse = await fetch(`${API_PROXY_URL}/api/k8s/nodes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ kubeconfig }),
+    });
+    
+    if (!nodesResponse.ok) {
+      // Handle error response properly
+      try {
+        const errorData = await nodesResponse.json();
+        throw new Error(`Failed to get nodes: ${errorData.error || nodesResponse.statusText}`);
+      } catch (parseError) {
+        throw new Error(`Failed to get nodes: ${nodesResponse.statusText} (${nodesResponse.status})`);
+      }
     }
+    
+    const nodesData = await nodesResponse.json();
+    console.log(`Retrieved ${nodesData.items?.length || 0} LIVE nodes from the cluster`);
+    
+    // Step 2: Get pods information via proxy
+    const podsResponse = await fetch(`${API_PROXY_URL}/api/k8s/pods`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ kubeconfig }),
+    });
+    
+    if (!podsResponse.ok) {
+      // Handle error response properly
+      try {
+        const errorData = await podsResponse.json();
+        throw new Error(`Failed to get pods: ${errorData.error || podsResponse.statusText}`);
+      } catch (parseError) {
+        throw new Error(`Failed to get pods: ${podsResponse.statusText} (${podsResponse.status})`);
+      }
+    }
+    
+    const podsData = await podsResponse.json();
+    console.log(`Retrieved ${podsData.items?.length || 0} LIVE pods from the cluster`);
+    
+    // Process the data
+    const nodes = processNodesData(nodesData);
+    const pods = processPodsData(podsData);
+    
+    // Calculate cluster health
+    const notReadyNodes = nodes.filter(n => !n.ready).length;
+    const healthStatus = determineClusterHealth(notReadyNodes, nodes.length);
+    
+    // Extract Kubernetes version from the first node if available
+    let kubernetesVersion = 'unknown';
+    if (nodes.length > 0 && nodes[0].version) {
+      kubernetesVersion = nodes[0].version;
+    }
+    
+    // Update connection status
+    connectionStatus.isConnected = true;
+    connectionStatus.lastError = null;
+    connectionStatus.connectTime = new Date();
+    connectionStatus.clusterName = eksClusterName || 'unknown';
+    
+    // Return the cluster status with real data
+    return {
+      nodes,
+      pods,
+      kubernetesVersion,
+      timestamp: new Date().toISOString(),
+      healthStatus
+    };
   } catch (error: any) {
     console.error('Error fetching cluster status:', error);
     connectionStatus.isConnected = false;
     connectionStatus.lastError = error.message;
-    connectionStatus.lastConnectionAttemptTime = new Date().toISOString();
     
     // No fallbacks - propagate the error
     throw error;
@@ -1009,7 +638,7 @@ function simulateClusterStatus(kubeconfig: string): KubernetesClusterStatus {
   // Set connection status
   connectionStatus.isConnected = true;
   connectionStatus.lastError = null;
-  connectionStatus.lastConnectionAttemptTime = new Date().toISOString();
+  connectionStatus.connectTime = new Date();
   connectionStatus.clusterName = clusterNameValue;
   
   return {

@@ -123,11 +123,28 @@ const Migration = () => {
       setMigrationStatus('fetching');
       
       // In a real implementation, we would fetch the actual resources here
-      // For now, we'll create a sample list of resources to migrate
+      // Create a sample list of resources to migrate including workloads and networking
       const resourcesToMigrate: ResourceToMigrate[] = [
-        // Use commonly deployed resources
+        // Core resources
+        { kind: 'Namespace', name: 'default', namespace: '' },
+        
+        // Workload resources
         { kind: 'Deployment', name: 'nginx', namespace: 'default' },
+        { kind: 'Deployment', name: 'frontend-app', namespace: 'default' },
+        { kind: 'Deployment', name: 'backend-api', namespace: 'default' },
+        { kind: 'StatefulSet', name: 'database', namespace: 'default' },
+        { kind: 'DaemonSet', name: 'monitoring-agent', namespace: 'default' },
+        { kind: 'Job', name: 'data-migration', namespace: 'default' },
+        { kind: 'CronJob', name: 'nightly-backup', namespace: 'default' },
+        
+        // Networking resources
         { kind: 'Service', name: 'nginx', namespace: 'default' },
+        { kind: 'Service', name: 'frontend-app', namespace: 'default' },
+        { kind: 'Service', name: 'backend-api', namespace: 'default' },
+        { kind: 'Service', name: 'database', namespace: 'default' },
+        { kind: 'Ingress', name: 'app-ingress', namespace: 'default' },
+        
+        // Configuration resources
         { kind: 'ConfigMap', name: 'app-config', namespace: 'default' },
         { kind: 'Secret', name: 'app-secrets', namespace: 'default' }
       ];
