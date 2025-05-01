@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { 
+import {
   Check, 
   ChevronRight, 
   AlertCircle, 
@@ -38,19 +38,31 @@ import ResourceInventory from './ResourceInventory';
 import CompatibilityCheck from './CompatibilityCheck';
 import { useAuth } from '@/contexts/AuthContext';
 import { Cluster, clusterService } from '@/utils/dynamodb';
-import { 
-  EKSClusterConfig, 
-  EKSNodeInfo, 
+import {
+  EKSClusterConfig,
+  EKSNodeInfo,
   EKSPodInfo, 
   EKSPVInfo, 
-  connectToEKSCluster, 
-  getEKSNodes, 
-  getEKSPods, 
+  connectToEKSCluster,
+  getEKSNodes,
+  getEKSPods,
   getEKSPVs,
+  generateKubeconfig,
   checkClusterCompatibility,
-  generateKubeconfig
+  getEKSDeployments,
+  getEKSStatefulSets,
+  getEKSDaemonSets,
+  getEKSReplicaSets,
+  getEKSJobs,
+  getEKSCronJobs,
+  getEKSServices,
+  getEKSIngresses,
+  getEKSConfigMaps,
+  getEKSSecrets,
+  getEKSPVCs
 } from '@/utils/aws';
 import MigrationService from '@/utils/migrationService';
+import { KUBERNETES_API } from '@/utils/api';
 
 const steps = [
   { 
@@ -111,7 +123,7 @@ const MigrationWizard = () => {
     region: 'us-east-1',
     useIAMRole: false,
   });
-  
+
   const [targetConfig, setTargetConfig] = useState<EKSClusterConfig>({
     clusterName: '',
     region: 'us-east-1',
@@ -127,6 +139,117 @@ const MigrationWizard = () => {
   const [nodes, setNodes] = useState<EKSNodeInfo[]>([]);
   const [pods, setPods] = useState<EKSPodInfo[]>([]);
   const [persistentVolumes, setPersistentVolumes] = useState<EKSPVInfo[]>([]);
+  
+  // Add workload resources
+  const [deployments, setDeployments] = useState<{
+    name: string;
+    namespace: string;
+    replicas: number;
+    availableReplicas: number;
+    strategy: string;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [statefulSets, setStatefulSets] = useState<{
+    name: string;
+    namespace: string;
+    replicas: number;
+    readyReplicas: number;
+    serviceName: string;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [daemonSets, setDaemonSets] = useState<{
+    name: string;
+    namespace: string;
+    desired: number;
+    current: number;
+    ready: number;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [replicaSets, setReplicaSets] = useState<{
+    name: string;
+    namespace: string;
+    desired: number;
+    current: number;
+    ready: number;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [jobs, setJobs] = useState<{
+    name: string;
+    namespace: string;
+    completions: number;
+    duration: string;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [cronJobs, setCronJobs] = useState<{
+    name: string;
+    namespace: string;
+    schedule: string;
+    lastSchedule: string;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  // Add networking resources
+  const [services, setServices] = useState<{
+    name: string;
+    namespace: string;
+    type: string;
+    clusterIP: string;
+    externalIP?: string;
+    ports: string;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [ingresses, setIngresses] = useState<{
+    name: string;
+    namespace: string;
+    hosts: string[];
+    tls: boolean;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  // Add configuration resources
+  const [configMaps, setConfigMaps] = useState<{
+    name: string;
+    namespace: string;
+    dataCount: number;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  const [secrets, setSecrets] = useState<{
+    name: string;
+    namespace: string;
+    type: string;
+    dataCount: number;
+    age: string;
+    selected: boolean;
+  }[]>([]);
+
+  // Add persistent volume claims
+  const [persistentVolumeClaims, setPersistentVolumeClaims] = useState<{
+    name: string;
+    namespace: string;
+    status: string;
+    volume: string;
+    capacity: string;
+    accessModes: string[];
+    storageClass: string;
+    age: string;
+    selected: boolean;
+  }[]>([]);
 
   // Compatibility check states
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
@@ -149,7 +272,13 @@ const MigrationWizard = () => {
     nodes: 0,
     services: 0,
     configMaps: 0,
-    secrets: 0
+    secrets: 0,
+    deployments: 0,
+    statefulSets: 0,
+    daemonSets: 0,
+    replicaSets: 0,
+    jobs: 0,
+    cronJobs: 0
   });
 
   // Load available clusters on component mount
@@ -206,7 +335,7 @@ const MigrationWizard = () => {
       useIAMRole: !cluster.kubeconfig
     });
   };
-  
+
   // Handle target cluster selection
   const handleTargetClusterSelect = async (clusterId: string) => {
     const cluster = availableMultiClusters.find(c => c.id === clusterId);
@@ -246,22 +375,22 @@ const MigrationWizard = () => {
     }
 
     setStatus('running');
-    
-    // Connect to source cluster
+      
+      // Connect to source cluster
     const sourceConnected = await connectToEKSCluster(sourceConfig);
     setSourceConnected(sourceConnected);
     
-    if (!sourceConnected) {
+      if (!sourceConnected) {
       setStatus('error');
       setError("Failed to connect to source cluster");
       return;
-    }
-    
-    // Connect to target cluster
+      }
+      
+      // Connect to target cluster
     const targetConnected = await connectToEKSCluster(targetConfig);
     setTargetConnected(targetConnected);
     
-    if (!targetConnected) {
+      if (!targetConnected) {
       setStatus('error');
       setError("Failed to connect to target cluster");
       return;
@@ -271,7 +400,7 @@ const MigrationWizard = () => {
     toast.success("Connected to both clusters successfully");
     setCurrentStep(1);
     setProgress(((currentStep + 2) / steps.length) * 100);
-    setStatus('idle');
+      setStatus('idle');
   };
 
   // Load resources from source cluster following the same pattern as ClusterDetails
@@ -287,9 +416,15 @@ const MigrationWizard = () => {
     try {
       // Use the same approach as ClusterDetails to organize resources by Kubernetes hierarchy
       console.log('Fetching resources using Kubernetes standard hierarchy');
+      console.log('Using sourceConfig:', JSON.stringify({
+        clusterName: sourceConfig.clusterName,
+        region: sourceConfig.region,
+        hasKubeconfig: !!sourceConfig.kubeconfig,
+        kubeConfigLength: sourceConfig.kubeconfig ? sourceConfig.kubeconfig.length : 0
+      }));
       
       // Step 1: Fetch namespaces first - this matches what ClusterDetails page does
-      const namespacesData = await fetch(`http://localhost:3001/api/k8s/namespaces`, {
+      const namespacesData = await fetch(KUBERNETES_API.GET_NAMESPACES, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -325,16 +460,74 @@ const MigrationWizard = () => {
         getEKSPVs(sourceConfig)
       ]);
 
+      // Fetch workload resources in parallel
+      const [deploymentsData, statefulSetsData, daemonSetsData, replicaSetsData, jobsData, cronJobsData] = await Promise.all([
+        getEKSDeployments(sourceConfig),
+        getEKSStatefulSets(sourceConfig),
+        getEKSDaemonSets(sourceConfig),
+        getEKSReplicaSets(sourceConfig),
+        getEKSJobs(sourceConfig),
+        getEKSCronJobs(sourceConfig)
+      ]);
+
+      // Fetch networking resources in parallel
+      const [servicesData, ingressesData] = await Promise.all([
+        getEKSServices(sourceConfig),
+        getEKSIngresses(sourceConfig)
+      ]);
+
+      // Fetch configuration resources in parallel
+      const [configMapsData, secretsData] = await Promise.all([
+        getEKSConfigMaps(sourceConfig),
+        getEKSSecrets(sourceConfig)
+      ]);
+
+      // Fetch storage resources (PVCs)
+      const pvcsData = await getEKSPVCs(sourceConfig);
+
+      console.log('Deployments data:', deploymentsData);
+      console.log('StatefulSets data:', statefulSetsData);
+      console.log('DaemonSets data:', daemonSetsData);
+      console.log('ReplicaSets data:', replicaSetsData);
+      console.log('Jobs data:', jobsData);
+      console.log('CronJobs data:', cronJobsData);
+      console.log('Services data:', servicesData);
+      console.log('Ingresses data:', ingressesData);
+      console.log('ConfigMaps data:', configMapsData);
+      console.log('Secrets data:', secretsData);
+      console.log('PVCs data:', pvcsData);
+
       // Set all resources following standard Kubernetes organization
       setNamespaces(namespacesData);
       setNodes(nodesData);
       setPods(podsData);
       setPersistentVolumes(pvsData);
+      
+      // Set workload resources
+      setDeployments(deploymentsData);
+      setStatefulSets(statefulSetsData);
+      setDaemonSets(daemonSetsData);
+      setReplicaSets(replicaSetsData);
+      setJobs(jobsData);
+      setCronJobs(cronJobsData);
+
+      // Set networking resources
+      setServices(servicesData);
+      setIngresses(ingressesData);
+      
+      // Set configuration resources
+      setConfigMaps(configMapsData);
+      setSecrets(secretsData);
+      
+      // Set storage resources
+      setPersistentVolumeClaims(pvcsData);
 
       toast.success("Resources loaded successfully");
       setStatus('idle');
     } catch (error) {
       console.error("Failed to load resources:", error);
+      console.error("Error details:", error instanceof Error ? error.message : String(error));
+      console.error("Error stack:", error instanceof Error ? error.stack : "No stack available");
       setStatus('error');
       setError(`Failed to load resources: ${(error as Error).message}`);
     } finally {
@@ -372,6 +565,73 @@ const MigrationWizard = () => {
         );
         setPersistentVolumes(updatedPVs);
         break;
+      case 'deployments':
+        const updatedDeployments = deployments.map(d => 
+          d.name === resource.name && d.namespace === resource.namespace ? { ...d, selected } : d
+        );
+        setDeployments(updatedDeployments);
+        break;
+      case 'statefulSets':
+        const updatedStatefulSets = statefulSets.map(s => 
+          s.name === resource.name && s.namespace === resource.namespace ? { ...s, selected } : s
+        );
+        setStatefulSets(updatedStatefulSets);
+        break;
+      case 'daemonSets':
+        const updatedDaemonSets = daemonSets.map(d => 
+          d.name === resource.name && d.namespace === resource.namespace ? { ...d, selected } : d
+        );
+        setDaemonSets(updatedDaemonSets);
+        break;
+      case 'replicaSets':
+        const updatedReplicaSets = replicaSets.map(r => 
+          r.name === resource.name && r.namespace === resource.namespace ? { ...r, selected } : r
+        );
+        setReplicaSets(updatedReplicaSets);
+        break;
+      case 'jobs':
+        const updatedJobs = jobs.map(j => 
+          j.name === resource.name && j.namespace === resource.namespace ? { ...j, selected } : j
+        );
+        setJobs(updatedJobs);
+        break;
+      case 'cronJobs':
+        const updatedCronJobs = cronJobs.map(c => 
+          c.name === resource.name && c.namespace === resource.namespace ? { ...c, selected } : c
+        );
+        setCronJobs(updatedCronJobs);
+        break;
+      case 'services':
+        const updatedServices = services.map(s => 
+          s.name === resource.name && s.namespace === resource.namespace ? { ...s, selected } : s
+        );
+        setServices(updatedServices);
+        break;
+      case 'ingresses':
+        const updatedIngresses = ingresses.map(i => 
+          i.name === resource.name && i.namespace === resource.namespace ? { ...i, selected } : i
+        );
+        setIngresses(updatedIngresses);
+        break;
+      case 'configMaps':
+        const updatedConfigMaps = configMaps.map(cm => 
+          cm.name === resource.name && cm.namespace === resource.namespace ? { ...cm, selected } : cm
+        );
+        setConfigMaps(updatedConfigMaps);
+        break;
+      case 'secrets':
+        const updatedSecrets = secrets.map(s => 
+          s.name === resource.name && s.namespace === resource.namespace ? { ...s, selected } : s
+        );
+        setSecrets(updatedSecrets);
+        break;
+      case 'persistentVolumeClaims':
+      case 'pvcs': // Support alias for backward compatibility
+        const updatedPVCs = persistentVolumeClaims.map(p => 
+          p.name === resource.name && p.namespace === resource.namespace ? { ...p, selected } : p
+        );
+        setPersistentVolumeClaims(updatedPVCs);
+        break;
       default:
         console.log(`Selection change for ${resourceType} not yet implemented`);
     }
@@ -379,24 +639,76 @@ const MigrationWizard = () => {
 
   // Handle select all functionality for any resource type
   const handleSelectAll = (resourceType: string, selectAll: boolean) => {
-    console.log(`Select all for ${resourceType}: ${selectAll}`);
+    console.log(`Selecting all ${resourceType} resources: ${selectAll}`);
     
     switch(resourceType) {
       case 'namespaces':
-        setNamespaces(namespaces.map(ns => ({ ...ns, selected: selectAll })));
+        const updatedNamespaces = namespaces.map(ns => ({ ...ns, selected: selectAll }));
+        setNamespaces(updatedNamespaces);
         break;
       case 'nodes':
-        setNodes(nodes.map(node => ({ ...node, selected: selectAll })));
+        const updatedNodes = nodes.map(node => ({ ...node, selected: selectAll }));
+        setNodes(updatedNodes);
         break;
       case 'pods':
-        setPods(pods.map(pod => ({ ...pod, selected: selectAll })));
+        const updatedPods = pods.map(pod => ({ ...pod, selected: selectAll }));
+        setPods(updatedPods);
         break;
       case 'persistentVolumes':
-      case 'pvs': // Support legacy 'pvs' value for backward compatibility
-        setPersistentVolumes(persistentVolumes.map(pv => ({ ...pv, selected: selectAll })));
+      case 'pvs': // Support alias
+        const updatedPVs = persistentVolumes.map(pv => ({ ...pv, selected: selectAll }));
+        setPersistentVolumes(updatedPVs);
+        break;
+      case 'deployments':
+        const updatedDeployments = deployments.map(d => ({ ...d, selected: selectAll }));
+        setDeployments(updatedDeployments);
+        break;
+      case 'statefulSets':
+        const updatedStatefulSets = statefulSets.map(s => ({ ...s, selected: selectAll }));
+        setStatefulSets(updatedStatefulSets);
+        break;
+      case 'daemonSets':
+        const updatedDaemonSets = daemonSets.map(d => ({ ...d, selected: selectAll }));
+        setDaemonSets(updatedDaemonSets);
+        break;
+      case 'replicaSets':
+        const updatedReplicaSets = replicaSets.map(r => ({ ...r, selected: selectAll }));
+        setReplicaSets(updatedReplicaSets);
+        break;
+      case 'jobs':
+        const updatedJobs = jobs.map(j => ({ ...j, selected: selectAll }));
+        setJobs(updatedJobs);
+        break;
+      case 'cronJobs':
+        const updatedCronJobs = cronJobs.map(c => ({ ...c, selected: selectAll }));
+        setCronJobs(updatedCronJobs);
+        break;
+      // Add new cases for networking resources
+      case 'services':
+        const updatedServices = services.map(s => ({ ...s, selected: selectAll }));
+        setServices(updatedServices);
+        break;
+      case 'ingresses':
+        const updatedIngresses = ingresses.map(i => ({ ...i, selected: selectAll }));
+        setIngresses(updatedIngresses);
+        break;
+      // Add new cases for configuration resources
+      case 'configMaps':
+        const updatedConfigMaps = configMaps.map(cm => ({ ...cm, selected: selectAll }));
+        setConfigMaps(updatedConfigMaps);
+        break;
+      case 'secrets':
+        const updatedSecrets = secrets.map(s => ({ ...s, selected: selectAll }));
+        setSecrets(updatedSecrets);
+        break;
+      // Add new cases for storage resources
+      case 'persistentVolumeClaims':
+      case 'pvcs': // Support alias for backward compatibility
+        const updatedPVCs = persistentVolumeClaims.map(p => ({ ...p, selected: selectAll }));
+        setPersistentVolumeClaims(updatedPVCs);
         break;
       default:
-        console.log(`Select all for ${resourceType} not implemented`);
+        console.log(`Select all for ${resourceType} not yet implemented`);
     }
   };
 
@@ -407,9 +719,18 @@ const MigrationWizard = () => {
     const selectedNodes = nodes.filter(node => node.selected).length;
     const selectedPods = pods.filter(pod => pod.selected).length;
     const selectedPVs = persistentVolumes.filter(pv => pv.selected).length;
+    const selectedDeployments = deployments.filter(d => d.selected).length;
+    const selectedStatefulSets = statefulSets.filter(s => s.selected).length;
+    const selectedDaemonSets = daemonSets.filter(d => d.selected).length;
+    const selectedReplicaSets = replicaSets.filter(r => r.selected).length;
+    const selectedJobs = jobs.filter(j => j.selected).length;
+    const selectedCronJobs = cronJobs.filter(c => c.selected).length;
     
-    const totalSelected = selectedNamespaces + selectedNodes + selectedPods + selectedPVs;
-    console.log(`Selected resources: ${selectedNamespaces} namespaces, ${selectedNodes} nodes, ${selectedPods} pods, ${selectedPVs} PVs`);
+    const totalSelected = selectedNamespaces + selectedNodes + selectedPods + selectedPVs +
+                          selectedDeployments + selectedStatefulSets + selectedDaemonSets + 
+                          selectedReplicaSets + selectedJobs + selectedCronJobs;
+    
+    console.log(`Selected resources: ${selectedNamespaces} namespaces, ${selectedNodes} nodes, ${selectedPods} pods, ${selectedPVs} PVs, ${selectedDeployments} deployments, ${selectedStatefulSets} statefulSets, ${selectedDaemonSets} daemonSets, ${selectedReplicaSets} replicaSets, ${selectedJobs} jobs, ${selectedCronJobs} cronJobs`);
     
     if (totalSelected === 0) {
       toast.error("Please select at least one resource to migrate");
@@ -459,12 +780,31 @@ const MigrationWizard = () => {
       const selectedNodesToMigrate = nodes.filter(node => node.selected);
       const selectedPodsToMigrate = pods.filter(pod => pod.selected);
       const selectedPVsToMigrate = persistentVolumes.filter(pv => pv.selected);
+      const selectedDeploymentsToMigrate = deployments.filter(d => d.selected);
+      const selectedStatefulSetsToMigrate = statefulSets.filter(s => s.selected);
+      const selectedDaemonSetsToMigrate = daemonSets.filter(d => d.selected);
+      const selectedReplicaSetsToMigrate = replicaSets.filter(r => r.selected);
+      const selectedJobsToMigrate = jobs.filter(j => j.selected);
+      const selectedCronJobsToMigrate = cronJobs.filter(c => c.selected);
+      
+      // Add filtering for new resource types
+      const selectedServicesToMigrate = services.filter(s => s.selected);
+      const selectedIngressesToMigrate = ingresses.filter(i => i.selected);
+      const selectedConfigMapsToMigrate = configMaps.filter(cm => cm.selected);
+      const selectedSecretsToMigrate = secrets.filter(s => s.selected);
+      const selectedPVCsToMigrate = persistentVolumeClaims.filter(p => p.selected);
       
       // Count total selected resources across all types
       const totalSelected = selectedNamespacesToMigrate.length + selectedNodesToMigrate.length + 
-                           selectedPodsToMigrate.length + selectedPVsToMigrate.length;
+                           selectedPodsToMigrate.length + selectedPVsToMigrate.length +
+                           selectedDeploymentsToMigrate.length + selectedStatefulSetsToMigrate.length + 
+                           selectedDaemonSetsToMigrate.length + selectedReplicaSetsToMigrate.length + 
+                           selectedJobsToMigrate.length + selectedCronJobsToMigrate.length +
+                           selectedServicesToMigrate.length + selectedIngressesToMigrate.length +
+                           selectedConfigMapsToMigrate.length + selectedSecretsToMigrate.length +
+                           selectedPVCsToMigrate.length;
       
-      console.log(`Selected for migration: ${selectedNamespacesToMigrate.length} namespaces, ${selectedNodesToMigrate.length} nodes, ${selectedPodsToMigrate.length} pods, ${selectedPVsToMigrate.length} PVs`);
+      console.log(`Selected for migration: ${selectedNamespacesToMigrate.length} namespaces, ${selectedNodesToMigrate.length} nodes, ${selectedPodsToMigrate.length} pods, ${selectedPVsToMigrate.length} PVs, ${selectedDeploymentsToMigrate.length} deployments, ${selectedStatefulSetsToMigrate.length} statefulSets, ${selectedDaemonSetsToMigrate.length} daemonSets, ${selectedReplicaSetsToMigrate.length} replicaSets, ${selectedJobsToMigrate.length} jobs, ${selectedCronJobsToMigrate.length} cronJobs`);
       
       // We shouldn't need this check since the button is disabled if nothing is selected,
       // but keeping it as a safety measure
@@ -474,7 +814,7 @@ const MigrationWizard = () => {
         return;
       }
       
-      // Convert to resource format expected by the API - FIX RESOURCE TYPE MAPPING
+      // Convert to resource format expected by the API
       const resources = [
         // Include namespaces
         ...selectedNamespacesToMigrate.map(ns => ({
@@ -494,12 +834,76 @@ const MigrationWizard = () => {
           namespace: pod.namespace || 'default',
           name: pod.name
         })),
-        // Include persistent volumes - FIX: Use correct resource type and remove namespace
+        // Include persistent volumes
         ...selectedPVsToMigrate.map(pv => ({
-          kind: 'PersistentVolume', // FIXED: Was incorrectly set to 'PersistentVolumeClaim'
-          namespace: '', // FIXED: PVs are cluster-scoped resources, not namespaced
+          kind: 'PersistentVolume',
+          namespace: '', // PVs are cluster-scoped resources, not namespaced
           name: pv.name
-        }))
+        })),
+        // Include deployments
+        ...selectedDeploymentsToMigrate.map(d => ({
+          kind: 'Deployment',
+          namespace: d.namespace || 'default',
+          name: d.name
+        })),
+        // Include statefulSets
+        ...selectedStatefulSetsToMigrate.map(s => ({
+          kind: 'StatefulSet',
+          namespace: s.namespace || 'default',
+          name: s.name
+        })),
+        // Include daemonSets
+        ...selectedDaemonSetsToMigrate.map(d => ({
+          kind: 'DaemonSet',
+          namespace: d.namespace || 'default',
+          name: d.name
+        })),
+        // Include replicaSets
+        ...selectedReplicaSetsToMigrate.map(r => ({
+          kind: 'ReplicaSet',
+          namespace: r.namespace || 'default',
+          name: r.name
+        })),
+        // Include jobs
+        ...selectedJobsToMigrate.map(j => ({
+          kind: 'Job',
+          namespace: j.namespace || 'default',
+          name: j.name
+        })),
+        // Include cronJobs
+        ...selectedCronJobsToMigrate.map(c => ({
+          kind: 'CronJob',
+          namespace: c.namespace || 'default',
+          name: c.name
+        })),
+        // Include networking resources
+        ...selectedServicesToMigrate.map(s => ({
+          kind: 'Service',
+          namespace: s.namespace || 'default',
+          name: s.name
+        })),
+        ...selectedIngressesToMigrate.map(i => ({
+          kind: 'Ingress',
+          namespace: i.namespace || 'default',
+          name: i.name
+        })),
+        // Include configuration resources
+        ...selectedConfigMapsToMigrate.map(cm => ({
+          kind: 'ConfigMap',
+          namespace: cm.namespace || 'default',
+          name: cm.name
+        })),
+        ...selectedSecretsToMigrate.map(s => ({
+          kind: 'Secret',
+          namespace: s.namespace || 'default',
+          name: s.name
+        })),
+        // Include storage resources
+        ...selectedPVCsToMigrate.map(p => ({
+          kind: 'PersistentVolumeClaim',
+          namespace: p.namespace || 'default',
+          name: p.name
+        })),
       ];
       
       // Set up migration options
@@ -564,7 +968,13 @@ const MigrationWizard = () => {
               nodes: migratedResourceCounts.Node || 0,
               services: migratedResourceCounts.Service || 0,
               configMaps: migratedResourceCounts.ConfigMap || 0,
-              secrets: migratedResourceCounts.Secret || 0
+              secrets: migratedResourceCounts.Secret || 0,
+              deployments: migratedResourceCounts.Deployment || 0,
+              statefulSets: migratedResourceCounts.StatefulSet || 0,
+              daemonSets: migratedResourceCounts.DaemonSet || 0,
+              replicaSets: migratedResourceCounts.ReplicaSet || 0,
+              jobs: migratedResourceCounts.Job || 0,
+              cronJobs: migratedResourceCounts.CronJob || 0
             });
             
             setStatus('completed');
@@ -645,6 +1055,12 @@ const MigrationWizard = () => {
     setNodes([]);
     setPods([]);
     setPersistentVolumes([]);
+    setDeployments([]);
+    setStatefulSets([]);
+    setDaemonSets([]);
+    setReplicaSets([]);
+    setJobs([]);
+    setCronJobs([]);
     setCompatibility({ compatible: false, issues: [] });
     setMigrationProgress({ step: 0, message: '' });
     
@@ -654,7 +1070,7 @@ const MigrationWizard = () => {
       pollTimeoutRef.current = null;
     }
   };
-  
+
   // Finish migration and navigate back to dashboard
   const finishMigration = () => {
     // First ensure the cluster is updated properly in Supabase
@@ -812,18 +1228,41 @@ const MigrationWizard = () => {
         );
         
       case 1:
+        console.log('ResourceInventory props:', {
+          namespaces: namespaces.length,
+          nodes: nodes.length,
+          pods: pods.length,
+          persistentVolumes: persistentVolumes.length,
+          deployments: deployments.length,
+          statefulSets: statefulSets.length,
+          daemonSets: daemonSets.length,
+          replicaSets: replicaSets.length,
+          jobs: jobs.length,
+          cronJobs: cronJobs.length
+        });
         return (
           <div className="space-y-6 py-4">
             <ResourceInventory
-              namespaces={namespaces as any} // Type assertion to resolve interface mismatch
+              namespaces={namespaces}
               nodes={nodes}
               pods={pods}
+              deployments={deployments}
+              statefulSets={statefulSets}
+              daemonSets={daemonSets}
+              replicaSets={replicaSets}
+              jobs={jobs}
+              cronJobs={cronJobs}
+              services={services}
+              ingresses={ingresses}
+              configMaps={configMaps}
+              secrets={secrets}
               persistentVolumes={persistentVolumes}
+              persistentVolumeClaims={persistentVolumeClaims}
+              sourceCluster={sourceCluster}
+              isLoading={loadingResources}
+              loadResources={loadResources}
               onResourceSelectionChange={handleResourceSelectionChange}
               onSelectAll={handleSelectAll}
-              loadResources={loadResources}
-              isLoading={loadingResources}
-              sourceCluster={sourceCluster}
             />
             
             {error && (
@@ -849,6 +1288,17 @@ const MigrationWizard = () => {
               nodes={nodes}
               pods={pods}
               persistentVolumes={persistentVolumes}
+              deployments={deployments}
+              statefulSets={statefulSets}
+              daemonSets={daemonSets}
+              replicaSets={replicaSets}
+              jobs={jobs}
+              cronJobs={cronJobs}
+              services={services}
+              ingresses={ingresses}
+              configMaps={configMaps}
+              secrets={secrets}
+              persistentVolumeClaims={persistentVolumeClaims}
             />
             
             {error && (
@@ -857,7 +1307,7 @@ const MigrationWizard = () => {
                 <div>
                   <h3 className="font-medium text-red-800 dark:text-red-300">Error</h3>
                   <p className="text-red-700 dark:text-red-300 mt-1 text-sm">{error}</p>
-            </div>
+                </div>
               </BlurContainer>
             )}
           </div>
@@ -917,7 +1367,7 @@ const MigrationWizard = () => {
                 <div>
                   <h3 className="font-medium text-red-800 dark:text-red-300">Error</h3>
                   <p className="text-red-700 dark:text-red-300 mt-1 text-sm">{error}</p>
-              </div>
+                </div>
               </BlurContainer>
             )}
           </div>
@@ -984,17 +1434,17 @@ const MigrationWizard = () => {
   const renderStepButtons = () => {
     switch(currentStep) {
       case 0:
-        return (
-          <>
-            <Button
-              variant="outline"
+    return (
+            <>
+              <Button 
+                variant="outline" 
               onClick={() => navigate('/dashboard')}
-            >
+              >
               Cancel
-            </Button>
-            <Button
-              onClick={connectToClusters}
-              disabled={
+              </Button>
+              <Button 
+                onClick={connectToClusters}
+                disabled={
                 status === 'running' || 
                 !sourceCluster || 
                 !targetCluster || 
@@ -1010,16 +1460,16 @@ const MigrationWizard = () => {
               ) : (
                 <>
                   Connect Clusters <ChevronRight className="ml-2 h-4 w-4" />
-                </>
-              )}
+            </>
+          )}
             </Button>
           </>
         );
-        
+          
       case 1:
         return (
           <>
-            <Button
+            <Button 
               variant="outline"
               onClick={() => {
               setCurrentStep(0);
@@ -1028,7 +1478,7 @@ const MigrationWizard = () => {
             >
               Back
             </Button>
-            <Button
+            <Button 
               onClick={proceedToCompatibilityCheck}
               disabled={status === 'running' || (
                 namespaces.filter(ns => ns.selected).length === 0 &&
@@ -1054,7 +1504,7 @@ const MigrationWizard = () => {
       case 2:
         return (
           <>
-            <Button
+            <Button 
               variant="outline"
               onClick={() => {
               setCurrentStep(1);
@@ -1086,12 +1536,12 @@ const MigrationWizard = () => {
           <>
             {status === 'error' ? (
               <>
-                <Button
-                  variant="outline"
+              <Button 
+                variant="outline" 
                   onClick={resetMigration}
-                >
+              >
                   Restart
-                </Button>
+              </Button>
                 <Button
                   onClick={() => navigate('/dashboard')}
                 >
@@ -1099,8 +1549,8 @@ const MigrationWizard = () => {
                 </Button>
               </>
             ) : status === 'completed' ? (
-              <Button
-                variant="outline"
+              <Button 
+                variant="outline" 
                 disabled
               >
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1119,7 +1569,7 @@ const MigrationWizard = () => {
         );
         
       case 4:
-        return (
+    return (
           <>
             <Button
               variant="outline"
@@ -1155,47 +1605,42 @@ const MigrationWizard = () => {
           {steps.map((step, index) => (
             <div 
               key={step.id} 
-              className={`flex flex-col items-center max-w-[100px] text-center ${
-                currentStep >= index 
-                  ? 'text-primary'
-                  : 'text-muted-foreground'
-              }`}
+              className={`
+                flex flex-col items-center
+                ${index === currentStep ? 'text-primary' : 'text-muted-foreground'}
+                ${index < currentStep ? 'text-primary' : ''}
+              `}
             >
               <div className={`
-                w-8 h-8 rounded-full flex items-center justify-center mb-2
-                ${currentStep > index 
-                  ? 'bg-primary text-primary-foreground' 
-                  : currentStep === index
-                    ? 'border-2 border-primary'
-                    : 'border-2 border-muted'
-                }
+                flex h-8 w-8 items-center justify-center rounded-full border border-primary 
+                ${index < currentStep ? 'bg-primary text-primary-foreground' : 'border-muted-foreground'}
+                ${index === currentStep ? 'bg-primary text-primary-foreground' : ''}
               `}>
-                {currentStep > index ? (
-                    <Check className="h-4 w-4" />
+                {index < currentStep ? (
+                  <Check className="h-5 w-5" />
                 ) : (
-                  step.icon
+                  <span>{index + 1}</span>
                 )}
               </div>
-              <div className="text-xs font-medium">{step.title}</div>
+              <span className="mt-2 text-sm font-medium">{step.title}</span>
             </div>
           ))}
         </div>
       </div>
-      
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={currentStep}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.3 }}
-        >
-          {renderStepContent()}
-        </motion.div>
-      </AnimatePresence>
-      
-      <div className="flex justify-end space-x-4 mt-8">
-        {renderStepButtons()}
+
+      <div className="mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>{steps[currentStep].title}</CardTitle>
+            <CardDescription>{steps[currentStep].description}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {renderStepContent()}
+          </CardContent>
+          <CardFooter className="flex justify-between">
+            {renderStepButtons()}
+          </CardFooter>
+        </Card>
       </div>
     </div>
   );

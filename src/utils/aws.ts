@@ -1,5 +1,6 @@
 import { toast } from "sonner";
 import { supabase } from './supabase';
+import { KUBERNETES_API, apiRequest } from './api';
 
 // Types for AWS EKS resources
 export interface EKSClusterConfig {
@@ -64,46 +65,50 @@ export const connectToEKSCluster = async (config: EKSClusterConfig): Promise<boo
 // Get real nodes from an EKS cluster through API
 export const getEKSNodes = async (config: EKSClusterConfig): Promise<EKSNodeInfo[]> => {
   try {
-    // Generate a kubeconfig appropriate for the specified cluster
-    const kubeconfig = await generateKubeconfig(config);
-    console.log(`Fetching nodes for ${config.clusterName} in ${config.region}`);
-    
-    // Make request to Kubernetes API for nodes, using the proxy server
-    const response = await fetch(`http://localhost:3001/kube-migrate/k8s/nodes`, {
+    const response = await fetch(KUBERNETES_API.GET_NODES, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        kubeconfig,
+        kubeconfig: config.kubeconfig,
         region: config.region,
         clusterName: config.clusterName
       })
     });
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch nodes: ${response.statusText}`);
-    }
-    
     const data = await response.json();
-    console.log(`Successfully retrieved ${data.items?.length || 0} nodes from ${config.region}`);
     
-    // Transform API response to EKSNodeInfo format
-    return data.items.map((node: any) => ({
-      name: node.metadata.name,
-      instanceType: node.metadata.labels['node.kubernetes.io/instance-type'] || 
-                   node.metadata.labels['beta.kubernetes.io/instance-type'] || 
-                   'Unknown',
-      status: node.status?.conditions?.find((c: any) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady',
-      capacity: {
-        cpu: node.status?.capacity?.cpu || '0',
-        memory: node.status?.capacity?.memory || '0',
-        pods: node.status?.capacity?.pods || '0'
+    return data.items?.map((node: any) => {
+      // Extract node capacity information
+      const cpu = node.status?.capacity?.cpu || 'Unknown';
+      const memory = node.status?.capacity?.memory || 'Unknown';
+      const pods = node.status?.capacity?.pods || 'Unknown';
+      
+      // Extract instance type from node labels
+      const instanceType = node.metadata?.labels?.['node.kubernetes.io/instance-type'] || 
+                           node.metadata?.labels?.['beta.kubernetes.io/instance-type'] ||
+                           'Unknown';
+      
+      // Determine node status from conditions
+      let status = 'Unknown';
+      const readyCondition = node.status?.conditions?.find((c: any) => c.type === 'Ready');
+      if (readyCondition) {
+        status = readyCondition.status === 'True' ? 'Ready' : 'NotReady';
       }
-    }));
+      
+      return {
+        name: node.metadata.name,
+        instanceType,
+        status,
+        capacity: {
+          cpu,
+          memory,
+          pods
+        },
+        selected: false
+      };
+    }) || [];
   } catch (error) {
-    console.error(`Failed to get EKS nodes for ${config.clusterName} in ${config.region}:`, error);
-    toast.error(`Failed to fetch nodes from ${config.region}: ${(error as Error).message}`);
+    console.error('Failed to fetch nodes:', error);
     return [];
   }
 };
@@ -111,49 +116,61 @@ export const getEKSNodes = async (config: EKSClusterConfig): Promise<EKSNodeInfo
 // Get real pods from an EKS cluster through API
 export const getEKSPods = async (config: EKSClusterConfig): Promise<EKSPodInfo[]> => {
   try {
-    // Generate a kubeconfig appropriate for the specified cluster
-    const kubeconfig = await generateKubeconfig(config);
-    console.log(`Fetching pods for ${config.clusterName} in ${config.region}`);
-    
-    // Make request to Kubernetes API for pods, using the proxy server
-    const response = await fetch(`http://localhost:3001/kube-migrate/k8s/pods`, {
+    const response = await fetch(KUBERNETES_API.GET_PODS, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        kubeconfig,
+        kubeconfig: config.kubeconfig,
         region: config.region,
         clusterName: config.clusterName 
       })
     });
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch pods: ${response.statusText}`);
-    }
-    
     const data = await response.json();
-    console.log(`Successfully retrieved ${data.items?.length || 0} pods from ${config.region}`);
     
-    // Transform API response to EKSPodInfo format
-    return data.items.map((pod: any) => {
-      // Calculate container count and restarts
-      const containerCount = pod.spec?.containers?.length || 0;
-      const restarts = pod.status?.containerStatuses?.reduce((total: number, container: any) => {
-        return total + (container.restartCount || 0);
-      }, 0) || 0;
+    return data.items?.map((pod: any) => {
+      // Extract pod status
+      let status = pod.status?.phase || 'Unknown';
+      
+      // More detailed status handling
+      if (status === 'Running') {
+        const notReadyContainer = pod.status?.containerStatuses?.find(
+          (c: any) => !c.ready
+        );
+        if (notReadyContainer) {
+          status = 'NotReady';
+        }
+      } else if (status === 'Pending') {
+        // Check if pod is being initialized
+        const initContainerStatuses = pod.status?.initContainerStatuses || [];
+        if (initContainerStatuses.length > 0 && initContainerStatuses.some((c: any) => !c.ready)) {
+          status = 'Init';
+        }
+        
+        // Check if pod is waiting on image pull
+        const containerStatuses = pod.status?.containerStatuses || [];
+        if (containerStatuses.some((c: any) => c.state?.waiting?.reason === 'ContainerCreating')) {
+          status = 'Creating';
+        }
+      }
+      
+      // Count container restarts
+      const containerRestarts = pod.status?.containerStatuses?.reduce(
+        (acc: number, c: any) => acc + (c.restartCount || 0),
+        0
+      ) || 0;
       
       return {
         name: pod.metadata.name,
         namespace: pod.metadata.namespace,
-        status: pod.status.phase,
-        containerCount,
-        restarts
+        status,
+        containerCount: pod.spec?.containers?.length || 0,
+        restarts: containerRestarts,
+        selected: false
       };
-    });
+    }) || [];
   } catch (error) {
-    console.error(`Failed to get EKS pods for ${config.clusterName} in ${config.region}:`, error);
-    toast.error(`Failed to fetch pods from ${config.region}: ${(error as Error).message}`);
+    console.error('Failed to fetch pods:', error);
     return [];
   }
 };
@@ -161,41 +178,41 @@ export const getEKSPods = async (config: EKSClusterConfig): Promise<EKSPodInfo[]
 // Get real persistent volumes from an EKS cluster through API
 export const getEKSPVs = async (config: EKSClusterConfig): Promise<EKSPVInfo[]> => {
   try {
-    // Generate a kubeconfig appropriate for the specified cluster
-    const kubeconfig = await generateKubeconfig(config);
-    console.log(`Fetching persistent volumes for ${config.clusterName} in ${config.region}`);
-    
-    // Make request to Kubernetes API for persistent volumes, using the proxy server
-    const response = await fetch(`http://localhost:3001/kube-migrate/k8s/persistentvolumes`, {
+    const response = await fetch(KUBERNETES_API.GET_PERSISTENT_VOLUMES, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        kubeconfig,
+        kubeconfig: config.kubeconfig,
         region: config.region,
         clusterName: config.clusterName 
       })
     });
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PVs: ${response.statusText}`);
-    }
-    
     const data = await response.json();
-    console.log(`Successfully retrieved ${data.items?.length || 0} persistent volumes from ${config.region}`);
     
-    // Transform API response to EKSPVInfo format
-    return data.items.map((pv: any) => ({
+    return data.items?.map((pv: any) => {
+      // Extract storage capacity
+      const capacity = pv.spec?.capacity?.storage || 'Unknown';
+    
+      // Extract storage class
+      const storageClass = pv.spec?.storageClassName || 'default';
+      
+      // Extract claim information if it exists
+      const claim = pv.spec?.claimRef ? 
+        `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : 
+        undefined;
+      
+      return {
       name: pv.metadata.name,
-      storageClass: pv.spec.storageClassName || 'standard',
-      capacity: pv.spec.capacity?.storage || 'Unknown',
-      status: pv.status.phase,
-      claim: pv.spec.claimRef ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : undefined
-    }));
+        storageClass,
+        capacity,
+        status: pv.status?.phase || 'Unknown',
+        claim,
+        selected: false
+      };
+    }) || [];
   } catch (error) {
-    console.error(`Failed to get EKS PVs for ${config.clusterName} in ${config.region}:`, error);
-    toast.error(`Failed to fetch PVs from ${config.region}: ${(error as Error).message}`);
+    console.error('Failed to fetch persistent volumes:', error);
     return [];
   }
 };
@@ -436,6 +453,475 @@ export const checkClusterCompatibility = async (
       compatible: false, 
       issues: [`Failed to check compatibility: ${(error as Error).message}`] 
     };
+  }
+};
+
+// Add these new workload resource getter functions
+export const getEKSDeployments = async (config: EKSClusterConfig) => {
+  try {
+    console.log('Using apiRequest for deployments...');
+    const data = await apiRequest(KUBERNETES_API.GET_DEPLOYMENTS, 'POST', {
+      kubeconfig: config.kubeconfig,
+      region: config.region,
+      clusterName: config.clusterName
+    });
+    
+    console.log('Deployments raw data:', JSON.stringify(data).substring(0, 200) + '...');
+    
+    return data.items?.map((deployment: any) => {
+      const creationTime = deployment.metadata?.creationTimestamp ? new Date(deployment.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      const replicas = deployment.spec?.replicas || 0;
+      const availableReplicas = deployment.status?.availableReplicas || 0;
+      
+      return {
+        name: deployment.metadata.name,
+        namespace: deployment.metadata.namespace,
+        replicas: replicas,
+        availableReplicas: availableReplicas,
+        strategy: deployment.spec?.strategy?.type || 'RollingUpdate',
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch deployments:', error);
+    return [];
+  }
+};
+
+export const getEKSStatefulSets = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_STATEFULSETS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((statefulSet: any) => {
+      const creationTime = statefulSet.metadata?.creationTimestamp ? new Date(statefulSet.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      const replicas = statefulSet.spec?.replicas || 0;
+      const readyReplicas = statefulSet.status?.readyReplicas || 0;
+      
+      return {
+        name: statefulSet.metadata.name,
+        namespace: statefulSet.metadata.namespace,
+        replicas: replicas,
+        readyReplicas: readyReplicas,
+        serviceName: statefulSet.spec?.serviceName || '',
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch statefulsets:', error);
+    return [];
+  }
+};
+
+export const getEKSDaemonSets = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_DAEMONSETS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((daemonSet: any) => {
+      const creationTime = daemonSet.metadata?.creationTimestamp ? new Date(daemonSet.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      const desiredNumberScheduled = daemonSet.status?.desiredNumberScheduled || 0;
+      const numberReady = daemonSet.status?.numberReady || 0;
+      
+      return {
+        name: daemonSet.metadata.name,
+        namespace: daemonSet.metadata.namespace,
+        desired: desiredNumberScheduled,
+        current: numberReady,
+        ready: numberReady,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch daemonsets:', error);
+    return [];
+  }
+};
+
+export const getEKSReplicaSets = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_REPLICASETS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((replicaSet: any) => {
+      const creationTime = replicaSet.metadata?.creationTimestamp ? new Date(replicaSet.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      const replicas = replicaSet.spec?.replicas || 0;
+      const readyReplicas = replicaSet.status?.readyReplicas || 0;
+      
+      return {
+        name: replicaSet.metadata.name,
+        namespace: replicaSet.metadata.namespace,
+        desired: replicas,
+        current: readyReplicas,
+        ready: readyReplicas,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch replicasets:', error);
+    return [];
+  }
+};
+
+export const getEKSJobs = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_JOBS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((job: any) => {
+      const creationTime = job.metadata?.creationTimestamp ? new Date(job.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      const completions = job.spec?.completions || 0;
+      const succeeded = job.status?.succeeded || 0;
+      
+      // Calculate duration if job has started/completed
+      let duration = '';
+      if (job.status?.startTime) {
+        const startTime = new Date(job.status.startTime);
+        const endTime = job.status?.completionTime ? new Date(job.status.completionTime) : new Date();
+        const diffInSeconds = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+        
+        if (diffInSeconds < 60) duration = `${diffInSeconds}s`;
+        else if (diffInSeconds < 3600) duration = `${Math.floor(diffInSeconds / 60)}m`;
+        else if (diffInSeconds < 86400) duration = `${Math.floor(diffInSeconds / 3600)}h`;
+        else duration = `${Math.floor(diffInSeconds / 86400)}d`;
+      }
+      
+      return {
+        name: job.metadata.name,
+        namespace: job.metadata.namespace,
+        completions: completions,
+        succeeded: succeeded,
+        duration: duration,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch jobs:', error);
+    return [];
+  }
+};
+
+export const getEKSCronJobs = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_CRONJOBS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((cronJob: any) => {
+      const creationTime = cronJob.metadata?.creationTimestamp ? new Date(cronJob.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      // Format last schedule time
+      let lastSchedule = '';
+      if (cronJob.status?.lastScheduleTime) {
+        const lastScheduleTime = new Date(cronJob.status.lastScheduleTime);
+        const diffInSeconds = Math.floor((now.getTime() - lastScheduleTime.getTime()) / 1000);
+        
+        if (diffInSeconds < 60) lastSchedule = `${diffInSeconds}s ago`;
+        else if (diffInSeconds < 3600) lastSchedule = `${Math.floor(diffInSeconds / 60)}m ago`;
+        else if (diffInSeconds < 86400) lastSchedule = `${Math.floor(diffInSeconds / 3600)}h ago`;
+        else lastSchedule = `${Math.floor(diffInSeconds / 86400)}d ago`;
+      }
+      
+      return {
+        name: cronJob.metadata.name,
+        namespace: cronJob.metadata.namespace,
+        schedule: cronJob.spec?.schedule || '',
+        lastSchedule: lastSchedule,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch cronjobs:', error);
+    return [];
+  }
+};
+
+// Get services from an EKS cluster
+export const getEKSServices = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_SERVICES, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName 
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((service: any) => {
+      const creationTime = service.metadata?.creationTimestamp ? new Date(service.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      // Format ports as string
+      const ports = (service.spec?.ports || []).map((port: any) => {
+        let portStr = `${port.port}`;
+        if (port.targetPort) {
+          portStr += `:${port.targetPort}`;
+        }
+        if (port.nodePort) {
+          portStr += `:${port.nodePort}`;
+        }
+        if (port.protocol && port.protocol !== 'TCP') {
+          portStr += `/${port.protocol}`;
+        }
+        return portStr;
+      }).join(', ');
+      
+      return {
+        name: service.metadata.name,
+        namespace: service.metadata.namespace,
+        type: service.spec?.type || 'ClusterIP',
+        clusterIP: service.spec?.clusterIP || '-',
+        externalIP: service.status?.loadBalancer?.ingress?.[0]?.ip || 
+                   service.status?.loadBalancer?.ingress?.[0]?.hostname || 
+                   '-',
+        ports: ports,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch services:', error);
+    return [];
+  }
+};
+
+// Get ingresses from an EKS cluster
+export const getEKSIngresses = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_INGRESSES, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName 
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((ingress: any) => {
+      const creationTime = ingress.metadata?.creationTimestamp ? new Date(ingress.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      // Extract hosts - handle both v1 and v1beta1 API versions
+      let hosts: string[] = [];
+      if (ingress.spec?.rules) {
+        hosts = ingress.spec.rules.map((rule: any) => rule.host || '-').filter(Boolean);
+      }
+      
+      // Check if TLS is configured
+      const hasTls = !!ingress.spec?.tls && ingress.spec.tls.length > 0;
+      
+      return {
+        name: ingress.metadata.name,
+        namespace: ingress.metadata.namespace,
+        hosts: hosts.length > 0 ? hosts : ['-'],
+        tls: hasTls,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch ingresses:', error);
+    return [];
+  }
+};
+
+// Get configmaps from an EKS cluster
+export const getEKSConfigMaps = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_CONFIGMAPS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName 
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((configMap: any) => {
+      const creationTime = configMap.metadata?.creationTimestamp ? new Date(configMap.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      // Count data items
+      const dataCount = Object.keys(configMap.data || {}).length;
+      
+      return {
+        name: configMap.metadata.name,
+        namespace: configMap.metadata.namespace,
+        dataCount: dataCount,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch configmaps:', error);
+    return [];
+  }
+};
+
+// Get secrets from an EKS cluster
+export const getEKSSecrets = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_SECRETS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName 
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((secret: any) => {
+      const creationTime = secret.metadata?.creationTimestamp ? new Date(secret.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      // Count data items
+      const dataCount = Object.keys(secret.data || {}).length;
+      
+      return {
+        name: secret.metadata.name,
+        namespace: secret.metadata.namespace,
+        type: secret.type || 'Opaque',
+        dataCount: dataCount,
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch secrets:', error);
+    return [];
+  }
+};
+
+// Get persistent volume claims from an EKS cluster
+export const getEKSPVCs = async (config: EKSClusterConfig) => {
+  try {
+    const response = await fetch(KUBERNETES_API.GET_PERSISTENT_VOLUME_CLAIMS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        kubeconfig: config.kubeconfig,
+        region: config.region,
+        clusterName: config.clusterName 
+      })
+    });
+    
+    const data = await response.json();
+    
+    return data.items?.map((pvc: any) => {
+      const creationTime = pvc.metadata?.creationTimestamp ? new Date(pvc.metadata.creationTimestamp) : new Date();
+      const now = new Date();
+      const diffInDays = Math.floor((now.getTime() - creationTime.getTime()) / (1000 * 60 * 60 * 24));
+      const age = diffInDays > 0 ? `${diffInDays}d` : 'New';
+      
+      return {
+        name: pvc.metadata.name,
+        namespace: pvc.metadata.namespace,
+        status: pvc.status?.phase || 'Pending',
+        volume: pvc.spec?.volumeName || '-',
+        capacity: pvc.status?.capacity?.storage || pvc.spec?.resources?.requests?.storage || '-',
+        accessModes: pvc.spec?.accessModes || [],
+        storageClass: pvc.spec?.storageClassName || 'default',
+        age: age,
+        selected: false
+      };
+    }) || [];
+  } catch (error) {
+    console.error('Failed to fetch persistent volume claims:', error);
+    return [];
   }
 };
 

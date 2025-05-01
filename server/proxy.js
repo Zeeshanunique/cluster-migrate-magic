@@ -1075,11 +1075,28 @@ export async function makeK8sRequestWithRetry(kubeconfig, apiPath, method = 'GET
                 }
               } else {
                 console.error(`Error fetching ${apiPath}: Status code ${response.statusCode}`);
-                reject({ statusCode: response.statusCode, error: `Request failed with status ${response.statusCode}`, data: data });
+                
+                try {
+                  // Try to parse the error response for better debugging
+                  const errorData = JSON.parse(data);
+                  console.log('K8s API error response details:', JSON.stringify(errorData, null, 2));
+                  reject({ 
+                    statusCode: response.statusCode, 
+                    error: `Request failed with status ${response.statusCode}`, 
+                    details: errorData 
+                  });
+                } catch (parseError) {
+                  // Could not parse the error response
+                  reject({ 
+                    statusCode: response.statusCode, 
+                    error: `Request failed with status ${response.statusCode}`, 
+                    data: data 
+                  });
+                }
               }
             } catch (parseError) {
-               console.error(`Error parsing K8s response for ${apiPath}:`, parseError);
-               reject({ statusCode: 500, error: 'Failed to parse K8s response', data: data });
+              console.error(`Error parsing K8s response for ${apiPath}:`, parseError);
+              reject({ statusCode: 500, error: 'Failed to parse K8s response', data: data });
             }
           });
         });
@@ -1151,42 +1168,32 @@ app.post('/kube-migrate/k8s/namespaces', async (req, res) => {
 // New endpoint to get services
 app.post('/kube-migrate/k8s/services', async (req, res) => {
   try {
-    const { kubeconfig, namespace = '' } = req.body;
-
+    console.log('Handling /kube-migrate/k8s/services request');
+    const { kubeconfig, namespace } = req.body;
+    
     if (!kubeconfig) {
-      return res.status(400).json({ error: 'Missing kubeconfig' });
+      return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // For mock data mode
-    if (process.env.VITE_USE_MOCK_K8S_DATA === 'true') {
-      console.log('Using mock data for services endpoint');
-      return res.json({
-        items: [
-          {
-            metadata: {
-              name: 'kubernetes',
-              namespace: 'default'
-            },
-            spec: {
-              type: 'ClusterIP',
-              ports: [{ port: 443, protocol: 'TCP' }]
-            }
-          }
-        ]
-      });
+    try {
+      // Fetch services from the Kubernetes API
+      const apiPath = namespace ? 
+        `/api/v1/namespaces/${namespace}/services` : 
+        `/api/v1/services`;
+        
+      console.log(`Fetching Services with API path: ${apiPath}`);
+      const services = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`Services API response received with ${services?.items?.length || 0} items`);
+      return res.json(services);
+    } catch (apiError) {
+      console.error('Error fetching services from K8s API:', apiError.message || apiError);
+      // Return empty list on error
+      const emptyServices = createEmptyK8sResourceList('Service');
+      res.json(emptyServices);
     }
-
-    // Use the new helper function
-    const apiPath = namespace
-      ? `/api/v1/namespaces/${namespace}/services`
-      : '/api/v1/services';
-    const servicesData = await makeK8sRequestWithRetry(kubeconfig, apiPath);
-    res.json(servicesData);
-
   } catch (error) {
-    console.error('Error in services endpoint:', error);
-    const statusCode = error.statusCode || 500;
-    res.status(statusCode).json({ error: `Failed to fetch services: ${error.error || error.message}` });
+    console.error('Server error in services endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1282,11 +1289,30 @@ app.post('/kube-migrate/k8s/deployments', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty deployments response
-    const emptyDeployments = createEmptyK8sResourceList('Deployment');
-    
-    // Return empty list for now
-    res.json(emptyDeployments);
+    try {
+      // Fetch deployments from the Kubernetes API
+      const apiPath = namespace ? 
+        `/apis/apps/v1/namespaces/${namespace}/deployments` : 
+        `/apis/apps/v1/deployments`;
+        
+      console.log(`Fetching Deployments with API path: ${apiPath}`);
+      const deployments = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`Deployments API response received with ${deployments?.items?.length || 0} items`);
+      
+      // Output a portion of the response for comparison with other resource types
+      if (deployments?.items?.length > 0) {
+        console.log('Sample deployment response structure:', 
+          JSON.stringify(deployments.items[0].metadata, null, 2).substring(0, 200) + '...');
+      }
+      
+      return res.json(deployments);
+    } catch (apiError) {
+      console.error('Error fetching deployments from K8s API:', apiError);
+      console.error('Deployments API error details:', JSON.stringify(apiError, null, 2));
+      // Return empty list on error
+      const emptyDeployments = createEmptyK8sResourceList('Deployment');
+      res.json(emptyDeployments);
+    }
   } catch (error) {
     console.error('Error handling deployments request:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
@@ -1303,11 +1329,23 @@ app.post('/kube-migrate/k8s/replicasets', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty replicasets response
-    const emptyReplicaSets = createEmptyK8sResourceList('ReplicaSet');
-    
-    // Return empty list for now
-    res.json(emptyReplicaSets);
+    try {
+      // Fetch replicasets from the Kubernetes API
+      const apiPath = namespace ? 
+        `/apis/apps/v1/namespaces/${namespace}/replicasets` : 
+        `/apis/apps/v1/replicasets`;
+      
+      console.log(`Fetching ReplicaSets with API path: ${apiPath}`);
+      const replicaSets = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`ReplicaSets API response received with ${replicaSets?.items?.length || 0} items`);
+      return res.json(replicaSets);
+    } catch (apiError) {
+      console.error('Error fetching replicasets from K8s API:', apiError);
+      console.error('ReplicaSets API error details:', JSON.stringify(apiError, null, 2));
+      // Return empty list on error
+      const emptyReplicaSets = createEmptyK8sResourceList('ReplicaSet');
+      res.json(emptyReplicaSets);
+    }
   } catch (error) {
     console.error('Error handling replicasets request:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
@@ -1324,11 +1362,23 @@ app.post('/kube-migrate/k8s/statefulsets', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty statefulsets response
-    const emptyStatefulSets = createEmptyK8sResourceList('StatefulSet');
-    
-    // Return empty list for now
-    res.json(emptyStatefulSets);
+    try {
+      // Fetch statefulsets from the Kubernetes API
+      const apiPath = namespace ? 
+        `/apis/apps/v1/namespaces/${namespace}/statefulsets` : 
+        `/apis/apps/v1/statefulsets`;
+      
+      console.log(`Fetching StatefulSets with API path: ${apiPath}`);
+      const statefulSets = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`StatefulSets API response received with ${statefulSets?.items?.length || 0} items`);
+      return res.json(statefulSets);
+    } catch (apiError) {
+      console.error('Error fetching statefulsets from K8s API:', apiError);
+      console.error('StatefulSets API error details:', JSON.stringify(apiError, null, 2));
+      // Return empty list on error
+      const emptyStatefulSets = createEmptyK8sResourceList('StatefulSet');
+      res.json(emptyStatefulSets);
+    }
   } catch (error) {
     console.error('Error handling statefulsets request:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
@@ -1345,11 +1395,23 @@ app.post('/kube-migrate/k8s/daemonsets', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty daemonsets response
-    const emptyDaemonSets = createEmptyK8sResourceList('DaemonSet');
-    
-    // Return empty list for now
-    res.json(emptyDaemonSets);
+    try {
+      // Fetch daemonsets from the Kubernetes API
+      const apiPath = namespace ? 
+        `/apis/apps/v1/namespaces/${namespace}/daemonsets` : 
+        `/apis/apps/v1/daemonsets`;
+      
+      console.log(`Fetching DaemonSets with API path: ${apiPath}`);
+      const daemonSets = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`DaemonSets API response received with ${daemonSets?.items?.length || 0} items`);
+      return res.json(daemonSets);
+    } catch (apiError) {
+      console.error('Error fetching daemonsets from K8s API:', apiError);
+      console.error('DaemonSets API error details:', JSON.stringify(apiError, null, 2));
+      // Return empty list on error
+      const emptyDaemonSets = createEmptyK8sResourceList('DaemonSet');
+      res.json(emptyDaemonSets);
+    }
   } catch (error) {
     console.error('Error handling daemonsets request:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
@@ -1366,11 +1428,23 @@ app.post('/kube-migrate/k8s/jobs', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty jobs response
-    const emptyJobs = createEmptyK8sResourceList('Job');
-    
-    // Return empty list for now
-    res.json(emptyJobs);
+    try {
+      // Fetch jobs from the Kubernetes API
+      const apiPath = namespace ? 
+        `/apis/batch/v1/namespaces/${namespace}/jobs` : 
+        `/apis/batch/v1/jobs`;
+      
+      console.log(`Fetching Jobs with API path: ${apiPath}`);
+      const jobs = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`Jobs API response received with ${jobs?.items?.length || 0} items`);
+      return res.json(jobs);
+    } catch (apiError) {
+      console.error('Error fetching jobs from K8s API:', apiError);
+      console.error('Jobs API error details:', JSON.stringify(apiError, null, 2));
+      // Return empty list on error
+      const emptyJobs = createEmptyK8sResourceList('Job');
+      res.json(emptyJobs);
+    }
   } catch (error) {
     console.error('Error handling jobs request:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
@@ -1387,11 +1461,33 @@ app.post('/kube-migrate/k8s/cronjobs', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty cronjobs response
-    const emptyCronJobs = createEmptyK8sResourceList('CronJob');
-    
-    // Return empty list for now
-    res.json(emptyCronJobs);
+    try {
+      // Try v1 API first (Kubernetes >= 1.21)
+      let apiPath = namespace ? 
+        `/apis/batch/v1/namespaces/${namespace}/cronjobs` : 
+        `/apis/batch/v1/cronjobs`;
+        
+      try {
+        console.log('Trying batch/v1 API for CronJobs');
+        const cronJobs = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+        return res.json(cronJobs);
+      } catch (v1Error) {
+        console.log('batch/v1 API failed, trying batch/v1beta1 API for CronJobs', v1Error.statusCode || v1Error.message);
+        
+        // Fall back to v1beta1 API (Kubernetes < 1.21)
+        apiPath = namespace ? 
+          `/apis/batch/v1beta1/namespaces/${namespace}/cronjobs` : 
+          `/apis/batch/v1beta1/cronjobs`;
+          
+        const cronJobs = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+        return res.json(cronJobs);
+      }
+    } catch (apiError) {
+      console.error('Error fetching cronjobs from K8s API:', apiError);
+      // Return empty list on error
+      const emptyCronJobs = createEmptyK8sResourceList('CronJob');
+      res.json(emptyCronJobs);
+    }
   } catch (error) {
     console.error('Error handling cronjobs request:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
@@ -1408,14 +1504,39 @@ app.post('/kube-migrate/k8s/ingresses', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty ingresses response
-    const emptyIngresses = createEmptyK8sResourceList('Ingress');
-    
-    // Return empty list for now
-    res.json(emptyIngresses);
+    try {
+      // Try v1 API first (Kubernetes >= 1.19)
+      let apiPath = namespace ? 
+        `/apis/networking.k8s.io/v1/namespaces/${namespace}/ingresses` : 
+        `/apis/networking.k8s.io/v1/ingresses`;
+        
+      try {
+        console.log(`Fetching Ingresses with API path: ${apiPath}`);
+        const ingresses = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+        console.log(`Ingresses API response received with ${ingresses?.items?.length || 0} items`);
+        return res.json(ingresses);
+      } catch (v1Error) {
+        console.log('networking.k8s.io/v1 API failed, trying networking.k8s.io/v1beta1 API for Ingresses');
+        
+        // Fall back to v1beta1 API (Kubernetes < 1.19)
+        apiPath = namespace ? 
+          `/apis/networking.k8s.io/v1beta1/namespaces/${namespace}/ingresses` : 
+          `/apis/networking.k8s.io/v1beta1/ingresses`;
+          
+        console.log(`Trying alternative Ingresses API path: ${apiPath}`);
+        const ingressesBeta = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+        console.log(`Ingresses v1beta1 API response received with ${ingressesBeta?.items?.length || 0} items`);
+        return res.json(ingressesBeta);
+      }
+    } catch (apiError) {
+      console.error('Error fetching ingresses from K8s API:', apiError.message || apiError);
+      // Return empty list on error
+      const emptyIngresses = createEmptyK8sResourceList('Ingress');
+      res.json(emptyIngresses);
+    }
   } catch (error) {
-    console.error('Error handling ingresses request:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    console.error('Server error in ingresses endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1429,14 +1550,25 @@ app.post('/kube-migrate/k8s/configmaps', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty configmaps response
-    const emptyConfigMaps = createEmptyK8sResourceList('ConfigMap');
-    
-    // Return empty list for now
-    res.json(emptyConfigMaps);
+    try {
+      // Fetch configmaps from the Kubernetes API
+      const apiPath = namespace ? 
+        `/api/v1/namespaces/${namespace}/configmaps` : 
+        `/api/v1/configmaps`;
+        
+      console.log(`Fetching ConfigMaps with API path: ${apiPath}`);
+      const configMaps = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`ConfigMaps API response received with ${configMaps?.items?.length || 0} items`);
+      return res.json(configMaps);
+    } catch (apiError) {
+      console.error('Error fetching configmaps from K8s API:', apiError.message || apiError);
+      // Return empty list on error
+      const emptyConfigMaps = createEmptyK8sResourceList('ConfigMap');
+      res.json(emptyConfigMaps);
+    }
   } catch (error) {
-    console.error('Error handling configmaps request:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    console.error('Server error in configmaps endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1450,14 +1582,25 @@ app.post('/kube-migrate/k8s/secrets', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty secrets response
-    const emptySecrets = createEmptyK8sResourceList('Secret');
-    
-    // Return empty list for now
-    res.json(emptySecrets);
+    try {
+      // Fetch secrets from the Kubernetes API
+      const apiPath = namespace ? 
+        `/api/v1/namespaces/${namespace}/secrets` : 
+        `/api/v1/secrets`;
+        
+      console.log(`Fetching Secrets with API path: ${apiPath}`);
+      const secrets = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`Secrets API response received with ${secrets?.items?.length || 0} items`);
+      return res.json(secrets);
+    } catch (apiError) {
+      console.error('Error fetching secrets from K8s API:', apiError.message || apiError);
+      // Return empty list on error
+      const emptySecrets = createEmptyK8sResourceList('Secret');
+      res.json(emptySecrets);
+    }
   } catch (error) {
-    console.error('Error handling secrets request:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    console.error('Server error in secrets endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1513,14 +1656,24 @@ app.post('/kube-migrate/k8s/persistentvolumes', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty persistent volumes response
-    const emptyPVs = createEmptyK8sResourceList('PersistentVolume');
-    
-    // Return empty list for now
-    res.json(emptyPVs);
+    try {
+      // Fetch persistent volumes from the Kubernetes API
+      // PVs are cluster-scoped, not namespaced
+      const apiPath = '/api/v1/persistentvolumes';
+        
+      console.log(`Fetching PersistentVolumes with API path: ${apiPath}`);
+      const persistentVolumes = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`PersistentVolumes API response received with ${persistentVolumes?.items?.length || 0} items`);
+      return res.json(persistentVolumes);
+    } catch (apiError) {
+      console.error('Error fetching persistentvolumes from K8s API:', apiError.message || apiError);
+      // Return empty list on error
+      const emptyPVs = createEmptyK8sResourceList('PersistentVolume');
+      res.json(emptyPVs);
+    }
   } catch (error) {
-    console.error('Error handling persistentvolumes request:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    console.error('Server error in persistentvolumes endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1534,14 +1687,25 @@ app.post('/kube-migrate/k8s/persistentvolumeclaims', async (req, res) => {
       return res.status(400).json({ error: 'Missing kubeconfig in request body' });
     }
 
-    // Create empty persistent volume claims response
-    const emptyPVCs = createEmptyK8sResourceList('PersistentVolumeClaim');
-    
-    // Return empty list for now
-    res.json(emptyPVCs);
+    try {
+      // Fetch persistent volume claims from the Kubernetes API
+      const apiPath = namespace ? 
+        `/api/v1/namespaces/${namespace}/persistentvolumeclaims` : 
+        `/api/v1/persistentvolumeclaims`;
+        
+      console.log(`Fetching PersistentVolumeClaims with API path: ${apiPath}`);
+      const persistentVolumeClaims = await makeK8sRequestWithRetry(kubeconfig, apiPath);
+      console.log(`PersistentVolumeClaims API response received with ${persistentVolumeClaims?.items?.length || 0} items`);
+      return res.json(persistentVolumeClaims);
+    } catch (apiError) {
+      console.error('Error fetching persistentvolumeclaims from K8s API:', apiError.message || apiError);
+      // Return empty list on error
+      const emptyPVCs = createEmptyK8sResourceList('PersistentVolumeClaim');
+      res.json(emptyPVCs);
+    }
   } catch (error) {
-    console.error('Error handling persistentvolumeclaims request:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    console.error('Server error in persistentvolumeclaims endpoint:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
