@@ -1480,12 +1480,24 @@ const MigrationWizard = () => {
             </Button>
             <Button 
               onClick={proceedToCompatibilityCheck}
-              disabled={status === 'running' || (
-                namespaces.filter(ns => ns.selected).length === 0 &&
-                nodes.filter(node => node.selected).length === 0 &&
-                pods.filter(pod => pod.selected).length === 0 &&
-                persistentVolumes.filter(pv => pv.selected).length === 0
-              )}
+              disabled={
+                status === 'running' || 
+                (namespaces.filter(ns => ns.selected).length + 
+                nodes.filter(node => node.selected).length + 
+                pods.filter(pod => pod.selected).length + 
+                persistentVolumes.filter(pv => pv.selected).length + 
+                deployments.filter(d => d.selected).length + 
+                statefulSets.filter(s => s.selected).length + 
+                daemonSets.filter(d => d.selected).length + 
+                replicaSets.filter(r => r.selected).length + 
+                jobs.filter(j => j.selected).length + 
+                cronJobs.filter(c => c.selected).length + 
+                services.filter(s => s.selected).length + 
+                ingresses.filter(i => i.selected).length + 
+                configMaps.filter(cm => cm.selected).length + 
+                secrets.filter(s => s.selected).length + 
+                persistentVolumeClaims.filter(pvc => pvc.selected).length) === 0
+              }
             >
               {status === 'running' ? (
                 <>
@@ -1627,7 +1639,7 @@ const MigrationWizard = () => {
           ))}
         </div>
       </div>
-
+      
       <div className="mb-8">
         <Card>
           <CardHeader>
@@ -1635,10 +1647,10 @@ const MigrationWizard = () => {
             <CardDescription>{steps[currentStep].description}</CardDescription>
           </CardHeader>
           <CardContent>
-            {renderStepContent()}
+          {renderStepContent()}
           </CardContent>
           <CardFooter className="flex justify-between">
-            {renderStepButtons()}
+        {renderStepButtons()}
           </CardFooter>
         </Card>
       </div>

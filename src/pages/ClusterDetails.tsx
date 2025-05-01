@@ -181,6 +181,8 @@ const ClusterDetails = () => {
     migrateVolumes: false
   });
   const [resourceType, setResourceType] = useState<string>('deployments');
+  const [isLoadingYaml, setIsLoadingYaml] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Function to fetch namespaces
   const fetchNamespaces = async (kubeconfig: string) => {
@@ -207,7 +209,7 @@ const ClusterDetails = () => {
         const namespacesList = namespacesData.items.map((ns: any) => ({
           name: ns.metadata.name,
           status: ns.status?.phase || 'Active',
-          creationTimestamp: ns.metadata.creationTimestamp,
+          creationTimestamp: formatDate(ns.metadata.creationTimestamp),
           labels: ns.metadata.labels || {},
           annotations: ns.metadata.annotations || {}
         }));
@@ -303,97 +305,118 @@ const ClusterDetails = () => {
   const fetchLiveStatus = async (kubeconfig?: string) => {
     if (!kubeconfig) return;
     
-    try {
       setIsLoadingLiveStatus(true);
-      setConnectionFailed(false);
       setLiveStatusError(null);
       
-      // Get Kubernetes current context
-      const contextInfo = await fetchKubeConfigDetails(kubeconfig);
+    try {
+      // Use the debug token endpoint to check connectivity first
+      const tokenResponse = await apiRequest(
+        KUBERNETES_API.DEBUG_TOKEN,
+        'POST',
+        { kubeconfig }
+      );
       
-      // Fetch cluster status data
-      const status = await fetchClusterStatus(kubeconfig);
+      console.log('Debug token response:', tokenResponse);
       
-      if (status) {
-        // Success path
-        setLiveClusterStatus(status);
-        setLastUpdated(new Date().toISOString());
-        setLiveStatusError(null);
+      if (tokenResponse) {
         setConsecutiveFailures(0);
         setConnectionFailed(false);
         
-        // Fetch all resources based on the Kubernetes hierarchy
-        fetchNamespaces(kubeconfig);
-        // Call the fetchNodes function
-        if (typeof fetchNodes === 'function') {
-          fetchNodes(kubeconfig);
-        }
+        // Update the last updated timestamp
+        const now = new Date();
+        setLastUpdated(now.toLocaleTimeString());
         
-        // If we have a selected namespace, fetch namespace-specific resources
-        if (selectedNamespace) {
-          fetchResourcesForNamespace(kubeconfig, selectedNamespace);
-        }
+        // Initialize a base liveClusterStatus with empty arrays to prevent null references
+        const baseStatus = {
+          nodes: [],
+          pods: [],
+          deployments: [],
+          services: [],
+          status: 'Connected',
+          kubernetesVersion: 'N/A',
+          replicaSets: [],
+          statefulSets: [],
+          daemonSets: [],
+          jobs: [],
+          cronJobs: []
+        };
         
-        // Check if cluster is of a type that might have EKS information
-        if (cluster && !cluster.eks_cluster_name && status && (status as any).clusterName) {
-          // Update cluster data with EKS name if found
-          const updatedCluster = {
-            ...cluster,
-            eks_cluster_name: (status as any).clusterName || ''
-          } as Cluster;
-          setCluster(updatedCluster);
+        // Fetch kubeconfig details for context information
+        try {
+          const kubeDetails = await apiRequest(
+            KUBERNETES_API.GET_KUBECONFIG_DETAILS,
+            'POST',
+            { kubeconfig }
+          );
           
-          // Attempt to update in DB if cluster entity exists
-          if (cluster.id) {
-            clusterService.updateCluster(cluster.id, {
-              eks_cluster_name: (status as any).clusterName || ''
+          if (kubeDetails) {
+            setLiveClusterStatus({
+              ...baseStatus,
+              ...liveClusterStatus, // Keep any existing data
+              context: kubeDetails.context,
+              user: kubeDetails.user,
+              server: kubeDetails.server,
+              version: kubeDetails.version,
+              kubernetesVersion: kubeDetails.version || 'N/A'
             });
+          } else {
+            // Set base status if no kubeDetails
+            setLiveClusterStatus(baseStatus);
           }
+        } catch (detailsError) {
+          console.error('Error fetching kubeconfig details:', detailsError);
+          // Set base status on error
+          setLiveClusterStatus(baseStatus);
         }
-      } else {
-        // Error handling
-        setConsecutiveFailures(prev => prev + 1);
-        setConnectionFailed(consecutiveFailures >= MAX_FAILURES_BEFORE_STATUS_UPDATE);
         
-        if (cluster && cluster.status !== 'failed' && 
-            consecutiveFailures >= MAX_FAILURES_BEFORE_STATUS_UPDATE) {
-          // Update cluster status to failed if too many consecutive failures
-          const updatedCluster = {
-            ...cluster,
-            status: 'failed' as "running" | "pending" | "failed"
-          } as Cluster;
-          setCluster(updatedCluster);
-          
-          // Update in DB if cluster entity exists
-          if (cluster.id) {
-            clusterService.updateCluster(cluster.id, { status: 'failed' });
+        // Get all cluster-wide resources
+        try {
+          // These functions appear to be missing, commenting out for now
+          await fetchNodes(kubeconfig);
+          if (selectedNamespace) {
+            await fetchResourcesForNamespace(kubeconfig, selectedNamespace);
           }
+        } catch (resourcesError) {
+          console.error('Error fetching cluster resources:', resourcesError);
+          // Continue with available data
         }
       }
     } catch (error) {
       console.error('Error fetching live status:', error);
-      setLiveStatusError('Failed to connect to the cluster');
-      setLiveClusterStatus(null);
-      // Set specific error messages based on error type
-      let errorMessage = 'Failed to fetch live cluster status';
       
-      if (error.message.includes('403') || error.message.includes('forbidden') || error.message.includes('Forbidden')) {
-        errorMessage = 'Access denied. The cluster may have been deleted or credentials revoked.';
-      } else if (error.message.includes('404') || error.message.includes('not found') || error.message.includes('NotFound')) {
-        errorMessage = 'Cluster not found. It may have been deleted or renamed.';
-      } else if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
-        errorMessage = 'Connection timed out. The cluster may be unreachable or not running.';
-      } else if (error.message.includes('certificate') || error.message.includes('x509')) {
-        errorMessage = 'Certificate error. The cluster TLS certificate may be invalid or expired.';
-      } else if (error.message.includes('unauthorized') || error.message.includes('invalid token') || error.message.includes('401')) {
-        errorMessage = 'Authorization failed. Your credentials may have expired or been revoked.';
-      } else if (error.message.includes('LIVE DATA ONLY MODE')) {
-        errorMessage = 'Cannot connect to cluster. The application is in LIVE DATA ONLY MODE. Please check your kubeconfig and ensure your cluster is accessible.';
+      // Increment consecutive failures
+      const failures = consecutiveFailures + 1;
+      setConsecutiveFailures(failures);
+      
+      // After multiple consecutive failures, update the cluster status
+      if (failures >= MAX_FAILURES_BEFORE_STATUS_UPDATE) {
+        setConnectionFailed(true);
+        setLiveClusterStatus({
+          // Initialize with empty arrays to prevent null references
+          nodes: [],
+          pods: [],
+          deployments: [],
+          services: [],
+          replicaSets: [],
+          statefulSets: [],
+          daemonSets: [],
+          jobs: [],
+          cronJobs: [],
+          status: 'Disconnected',
+          lastError: error instanceof Error ? error.message : 'Unknown error'
+        });
+        
+        // Show toast notification
+        toast.error(`Connection to cluster failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        
+        // Disable auto-refresh after multiple failures
+        if (autoRefreshEnabled) {
+          setAutoRefreshEnabled(false);
+          toast.info('Auto-refresh disabled due to connection failures');
+        }
       }
       
-      setLiveStatusError(errorMessage);
-      toast.error(errorMessage);
-      setLiveClusterStatus(null); // Ensure no partial data is shown
+      setLiveStatusError(error instanceof Error ? error.message : 'Unknown error');
     } finally {
       setIsLoadingLiveStatus(false);
     }
@@ -679,25 +702,30 @@ const ClusterDetails = () => {
 
   // Function to fetch pod YAML
   const fetchPodYaml = async (podName: string, namespace: string) => {
-    if (!cluster?.kubeconfig) return;
+    if (!podName || !namespace || !cluster?.kubeconfig) return "";
     
+    setIsLoadingYaml(true);
     try {
-      // Use the API utility to fetch pod YAML
-      const data = await apiRequest(
+      const yamlData = await apiRequest(
         KUBERNETES_API.GET_POD_YAML,
         'POST',
         {
           kubeconfig: cluster.kubeconfig,
-          podName,
-          namespace
+          namespace: namespace,
+          name: podName
         }
       );
       
-      return data.yaml;
+      if (yamlData && yamlData.yaml) {
+        return yamlData.yaml;
+      }
+      return "";
     } catch (error) {
       console.error('Error fetching pod YAML:', error);
-      toast.error('Failed to fetch pod configuration');
-      return null;
+      toast.error(`Failed to fetch pod YAML: ${(error as Error).message}`);
+      return "";
+    } finally {
+      setIsLoadingYaml(false);
     }
   };
   
@@ -957,415 +985,208 @@ const ClusterDetails = () => {
     // Fetch pods
     try {
       const podsData = await apiRequest(KUBERNETES_API.GET_PODS, 'POST', { kubeconfig, namespace });
-      if (podsData && podsData.items) setPods(podsData.items);
+      if (podsData && podsData.items) {
+        // Process pods data to add necessary fields for UI
+        const processedPods = podsData.items.map((pod: any) => ({
+          name: pod.metadata.name,
+          namespace: pod.metadata.namespace,
+          status: pod.status?.phase || 'Unknown',
+          restarts: pod.status?.containerStatuses?.[0]?.restartCount || 0,
+          node: pod.spec?.nodeName || 'Unknown',
+          age: formatDate(pod.metadata.creationTimestamp)
+        }));
+        
+        setPods(processedPods);
+        
+        // Update liveClusterStatus with the pods data
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          pods: processedPods
+        }));
+      }
     } catch (error) {
       console.error('Error fetching pods:', error);
-      // Continue with other workloads
+      // Update with empty array
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        pods: []
+      }));
     }
     
     // Fetch deployments
     try {
       const deploymentsData = await apiRequest(KUBERNETES_API.GET_DEPLOYMENTS, 'POST', { kubeconfig, namespace });
-      if (deploymentsData && deploymentsData.items) setDeployments(deploymentsData.items);
+      if (deploymentsData && deploymentsData.items) {
+        const processedDeployments = deploymentsData.items.map((deployment: any) => ({
+          name: deployment.metadata?.name,
+          namespace: deployment.metadata?.namespace,
+          replicas: deployment.spec?.replicas || 0,
+          availableReplicas: deployment.status?.availableReplicas || 0,
+          strategy: deployment.spec?.strategy?.type || 'Unknown',
+          age: formatDate(deployment.metadata?.creationTimestamp)
+        }));
+        setDeployments(processedDeployments);
+        
+        // Update liveClusterStatus with deployments
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          deployments: processedDeployments
+        }));
+      }
     } catch (error) {
       console.error('Error fetching deployments:', error);
-      // Continue with other workloads
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        deployments: []
+      }));
     }
     
     // Fetch replica sets
     try {
       const replicaSetsData = await apiRequest(KUBERNETES_API.GET_REPLICASETS, 'POST', { kubeconfig, namespace });
-      if (replicaSetsData && replicaSetsData.items) setReplicaSets(replicaSetsData.items);
+      if (replicaSetsData && replicaSetsData.items) {
+        const processedReplicaSets = replicaSetsData.items.map((rs: any) => ({
+          name: rs.metadata?.name,
+          namespace: rs.metadata?.namespace,
+          desired: rs.spec?.replicas || 0,
+          current: rs.status?.replicas || 0,
+          ready: rs.status?.readyReplicas || 0,
+          ownerReference: rs.metadata?.ownerReferences?.[0]?.name || '-',
+          age: formatDate(rs.metadata?.creationTimestamp)
+        }));
+        setReplicaSets(processedReplicaSets);
+        
+        // Update liveClusterStatus with replicaSets
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          replicaSets: processedReplicaSets
+        }));
+      }
     } catch (error) {
       console.error('Error fetching replica sets:', error);
-      // Continue with other workloads
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        replicaSets: []
+      }));
     }
     
     // Fetch stateful sets
     try {
       const statefulSetsData = await apiRequest(KUBERNETES_API.GET_STATEFULSETS, 'POST', { kubeconfig, namespace });
-      if (statefulSetsData && statefulSetsData.items) setStatefulSets(statefulSetsData.items);
+      if (statefulSetsData && statefulSetsData.items) {
+        const processedStatefulSets = statefulSetsData.items.map((sts: any) => ({
+          name: sts.metadata?.name,
+          namespace: sts.metadata?.namespace,
+          replicas: sts.spec?.replicas || 0,
+          readyReplicas: sts.status?.readyReplicas || 0,
+          serviceName: sts.spec?.serviceName || '-',
+          updateStrategy: sts.spec?.updateStrategy?.type || 'Unknown',
+          age: formatDate(sts.metadata?.creationTimestamp)
+        }));
+        setStatefulSets(processedStatefulSets);
+        
+        // Update liveClusterStatus with statefulSets
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          statefulSets: processedStatefulSets
+        }));
+      }
     } catch (error) {
       console.error('Error fetching stateful sets:', error);
-      // Continue with other workloads
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        statefulSets: []
+      }));
     }
     
     // Fetch daemon sets
     try {
       const daemonSetsData = await apiRequest(KUBERNETES_API.GET_DAEMONSETS, 'POST', { kubeconfig, namespace });
-      if (daemonSetsData && daemonSetsData.items) setDaemonSets(daemonSetsData.items);
+      if (daemonSetsData && daemonSetsData.items) {
+        const processedDaemonSets = daemonSetsData.items.map((ds: any) => ({
+          name: ds.metadata?.name,
+          namespace: ds.metadata?.namespace,
+          desiredNumberScheduled: ds.status?.desiredNumberScheduled || 0,
+          currentNumberScheduled: ds.status?.currentNumberScheduled || 0,
+          numberReady: ds.status?.numberReady || 0,
+          updateStrategy: ds.spec?.updateStrategy?.type || 'Unknown',
+          age: formatDate(ds.metadata?.creationTimestamp)
+        }));
+        setDaemonSets(processedDaemonSets);
+        
+        // Update liveClusterStatus with daemonSets
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          daemonSets: processedDaemonSets
+        }));
+      }
     } catch (error) {
       console.error('Error fetching daemon sets:', error);
-      // Continue with other workloads
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        daemonSets: []
+      }));
     }
     
     // Fetch jobs
     try {
       const jobsData = await apiRequest(KUBERNETES_API.GET_JOBS, 'POST', { kubeconfig, namespace });
-      if (jobsData && jobsData.items) setJobs(jobsData.items);
+      if (jobsData && jobsData.items) {
+        const processedJobs = jobsData.items.map((job: any) => ({
+          name: job.metadata?.name,
+          namespace: job.metadata?.namespace,
+          completions: job.spec?.completions || 0,
+          active: job.status?.active || 0,
+          succeeded: job.status?.succeeded || 0,
+          failed: job.status?.failed || 0,
+          age: formatDate(job.metadata?.creationTimestamp)
+        }));
+        setJobs(processedJobs);
+        
+        // Update liveClusterStatus with jobs
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          jobs: processedJobs
+        }));
+      }
     } catch (error) {
       console.error('Error fetching jobs:', error);
-      // Continue with other workloads
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        jobs: []
+      }));
     }
     
     // Fetch cron jobs
     try {
       const cronJobsData = await apiRequest(KUBERNETES_API.GET_CRONJOBS, 'POST', { kubeconfig, namespace });
-      if (cronJobsData && cronJobsData.items) setCronJobs(cronJobsData.items);
+      if (cronJobsData && cronJobsData.items) {
+        const processedCronJobs = cronJobsData.items.map((cj: any) => ({
+          name: cj.metadata?.name,
+          namespace: cj.metadata?.namespace,
+          schedule: cj.spec?.schedule || '-',
+          suspend: cj.spec?.suspend || false,
+          active: cj.status?.active?.length || 0,
+          lastScheduleTime: cj.status?.lastScheduleTime ? formatDate(cj.status.lastScheduleTime) : '-',
+          age: formatDate(cj.metadata?.creationTimestamp)
+        }));
+        setCronJobs(processedCronJobs);
+        
+        // Update liveClusterStatus with cronJobs
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          cronJobs: processedCronJobs
+        }));
+      }
     } catch (error) {
       console.error('Error fetching cron jobs:', error);
-      // Continue with other workloads
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        cronJobs: []
+      }));
     }
     
     setIsLoadingWorkloads(false);
-  };
-
-  // Function to fetch networking resources (services, ingresses)
-  const fetchNetworking = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig || !namespace) return;
-    
-    setIsLoadingNetworking(true);
-    
-    // Fetch services
-    try {
-      const servicesData = await apiRequest(
-        KUBERNETES_API.GET_SERVICES,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      if (servicesData && servicesData.items) {
-        setServices(servicesData.items);
-      }
-    } catch (error) {
-      console.error('Error fetching services:', error);
-      // Continue with other resources
-    }
-
-    // Fetch ingresses
-    try {
-      const ingressesData = await apiRequest(
-        KUBERNETES_API.GET_INGRESSES,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      if (ingressesData && ingressesData.items) {
-        setIngresses(ingressesData.items);
-      }
-    } catch (error) {
-      console.error('Error fetching ingresses:', error);
-      // Continue with other resources
-    }
-    
-    setIsLoadingNetworking(false);
-  };
-
-  // Function to fetch configuration resources (configmaps, secrets, etc.)
-  const fetchConfigurations = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig) return;
-    
-    setIsLoadingConfigurations(true);
-    // Clear previous state
-    setConfigMaps([]);
-    setSecrets([]);
-    setResourceQuotas([]);
-    setLimitRanges([]);
-
-    // Fetch configmaps
-    try {
-      const configMapsData = await apiRequest(
-        KUBERNETES_API.GET_CONFIGMAPS,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      
-      if (configMapsData && configMapsData.items) {
-        const configMapsList = configMapsData.items.map((cm: any) => ({
-          name: cm.metadata.name,
-          namespace: cm.metadata.namespace,
-          data: cm.data,
-          dataCount: cm.data ? Object.keys(cm.data).length : 0, 
-          age: formatDate(cm.metadata.creationTimestamp)
-        }));
-        setConfigMaps(configMapsList);
-      }
-    } catch (error) {
-      console.error('Error fetching configmaps:', error);
-      // Continue with other configurations
-    }
-    
-    // Fetch secrets
-    try {
-      const secretsData = await apiRequest(
-        KUBERNETES_API.GET_SECRETS,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      
-      if (secretsData && secretsData.items) {
-        const secretsList = secretsData.items.map((secret: any) => ({
-          name: secret.metadata.name,
-          namespace: secret.metadata.namespace,
-          type: secret.type,
-          dataCount: secret.data ? Object.keys(secret.data).length : 0, 
-          age: formatDate(secret.metadata.creationTimestamp)
-        }));
-        setSecrets(secretsList);
-      }
-    } catch (error) {
-      console.error('Error fetching secrets:', error);
-      // Continue with other configurations
-    }
-    
-    // Fetch resource quotas
-    try {
-      const resourceQuotasData = await apiRequest(
-        KUBERNETES_API.GET_RESOURCE_QUOTAS,
-        'POST',
-        { kubeconfig, namespace }
-      );
-      
-      if (resourceQuotasData && resourceQuotasData.items) {
-        const resourceQuotasList = resourceQuotasData.items.map((quota: any) => ({
-          name: quota.metadata.name,
-          namespace: quota.metadata.namespace,
-          resources: Object.entries(quota.status?.hard || {}).map(([resource, hardLimit]) => ({
-             resource,
-             used: quota.status?.used?.[resource] || '0',
-             hard: hardLimit
-           })),
-          age: formatDate(quota.metadata.creationTimestamp)
-        }));
-        setResourceQuotas(resourceQuotasList);
-      }
-    } catch (error) {
-      console.error('Error fetching resource quotas:', error);
-      // Continue with other configurations
-    }
-
-    // Fetch limit ranges
-    try {
-      const limitRangesData = await apiRequest(
-        KUBERNETES_API.GET_LIMIT_RANGES, 
-        'POST',
-        { kubeconfig, namespace }
-      );
-
-      if (limitRangesData && limitRangesData.items) {
-        const limitRangesList = limitRangesData.items.map((limit: any) => ({
-          name: limit.metadata.name,
-          namespace: limit.metadata.namespace,
-          limits: limit.spec?.limits?.map((item: any) => ({
-            type: item.type,
-            resource: Object.keys(item.min || item.max || item.default || item.defaultRequest || {})[0] || 'N/A',
-            min: item.min ? Object.values(item.min)[0] : '-',
-            max: item.max ? Object.values(item.max)[0] : '-',
-            default: item.default ? Object.values(item.default)[0] : '-',
-            defaultRequest: item.defaultRequest ? Object.values(item.defaultRequest)[0] : '-',
-          })) || [],
-          age: formatDate(limit.metadata.creationTimestamp)
-        }));
-        setLimitRanges(limitRangesList);
-      }
-    } catch (error) {
-      console.error('Error fetching limit ranges:', error);
-      // Continue with other configurations
-    }
-    
-    setIsLoadingConfigurations(false);
-  };
-
-  // Function to fetch storage resources (PVs, PVCs, StorageClasses)
-  const fetchStorage = async (kubeconfig: string) => {
-    if (!kubeconfig) return;
-    
-    setIsLoadingStorage(true);
-    // Clear previous state
-    setPersistentVolumes([]);
-    setPersistentVolumeClaims([]);
-    setStorageClasses([]);
-
-    try {
-      // Fetch persistent volumes 
-      try {
-        const persistentVolumesData = await apiRequest(
-          KUBERNETES_API.GET_PERSISTENT_VOLUMES,
-          'POST',
-          { kubeconfig }
-        );
-        
-        if (persistentVolumesData && persistentVolumesData.items) {
-          const pvList = persistentVolumesData.items.map((pv: any) => ({
-            name: pv.metadata.name,
-            capacity: pv.spec.capacity?.storage,
-            accessModes: pv.spec.accessModes,
-            reclaimPolicy: pv.spec.persistentVolumeReclaimPolicy,
-            status: pv.status.phase,
-            claim: pv.spec.claimRef ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : '-',
-            storageClass: pv.spec.storageClassName || '-',
-            age: formatDate(pv.metadata.creationTimestamp)
-          }));
-          setPersistentVolumes(pvList);
-        }
-      } catch (pvError) {
-        console.error('Error fetching persistent volumes:', pvError);
-      }
-      
-      // Fetch persistent volume claims
-      try {
-        const persistentVolumeClaimsData = await apiRequest(
-          KUBERNETES_API.GET_PERSISTENT_VOLUME_CLAIMS,
-          'POST',
-          { kubeconfig } 
-        );
-        
-        if (persistentVolumeClaimsData && persistentVolumeClaimsData.items) {
-          const pvcList = persistentVolumeClaimsData.items.map((pvc: any) => ({
-            name: pvc.metadata.name,
-            namespace: pvc.metadata.namespace,
-            status: pvc.status.phase,
-            volumeName: pvc.spec.volumeName || '-',
-            capacity: pvc.status.capacity?.storage,
-            accessModes: pvc.spec.accessModes,
-            storageClass: pvc.spec.storageClassName || '-',
-            age: formatDate(pvc.metadata.creationTimestamp)
-          }));
-          setPersistentVolumeClaims(pvcList);
-        }
-      } catch (pvcError) {
-        console.error('Error fetching persistent volume claims:', pvcError);
-      }
-      
-      // Fetch storage classes
-      try {
-        const storageClassesData = await apiRequest(
-          KUBERNETES_API.GET_STORAGE_CLASSES,
-          'POST',
-          { kubeconfig }
-        );
-        
-        if (storageClassesData && storageClassesData.items) {
-          const scList = storageClassesData.items.map((sc: any) => ({
-            name: sc.metadata.name,
-            provisioner: sc.provisioner,
-            reclaimPolicy: sc.reclaimPolicy || 'Delete',
-            volumeBindingMode: sc.volumeBindingMode || 'Immediate',
-            allowVolumeExpansion: sc.allowVolumeExpansion || false,
-            isDefault: sc.metadata.annotations?.['storageclass.kubernetes.io/is-default-class'] === 'true',
-            age: formatDate(sc.metadata.creationTimestamp)
-          }));
-          setStorageClasses(scList);
-        }
-      } catch (scError) {
-        console.error('Error fetching storage classes:', scError);
-      }
-    } catch (error) {
-      console.error('Error fetching storage resources:', error);
-      toast.error('Failed to fetch storage resources');
-    } finally {
-      setIsLoadingStorage(false);
-    }
-  };
-  
-  // Function to fetch all resources for a namespace
-  const fetchResourcesForNamespace = async (kubeconfig: string, namespace: string) => {
-    if (!kubeconfig || !namespace) {
-      console.error("Cannot fetch resources: missing kubeconfig or namespace");
-      return;
-    }
-    
-    console.log(`Fetching all resources for namespace: ${namespace}`);
-    
-    // Fetch all resource types for this namespace, handling each separately
-    
-    // Fetch workloads (pods, deployments, etc.)
-    try {
-      await fetchWorkloads(kubeconfig, namespace);
-    } catch (error) {
-      console.error(`Error fetching workloads for namespace ${namespace}:`, error);
-      // Continue with other resources
-    }
-    
-    // Fetch networking resources (services, ingresses)
-    try {
-      await fetchNetworking(kubeconfig, namespace);
-    } catch (error) {
-      console.error(`Error fetching networking resources for namespace ${namespace}:`, error);
-      // Continue with other resources
-    }
-    
-    // Fetch configuration resources (configmaps, secrets, etc.)
-    try {
-      await fetchConfigurations(kubeconfig, namespace);
-    } catch (error) {
-      console.error(`Error fetching configuration resources for namespace ${namespace}:`, error);
-      // Continue with other resources
-    }
-    
-    // Storage resources might be cluster-wide, but some like PVCs are namespace-scoped
-    try {
-      await fetchStorage(kubeconfig);
-    } catch (error) {
-      console.error(`Error fetching storage resources:`, error);
-      // Continue with other resources
-    }
-    
-    // Fetch specific services for this namespace
-    try {
-      await fetchServices(kubeconfig, namespace);
-    } catch (error) {
-      console.error(`Error fetching services for namespace ${namespace}:`, error);
-      // Continue with other resources
-    }
-    
-    console.log(`Completed resource fetching for namespace: ${namespace}`);
-  };
-  
-  // Function to fetch nodes
-  const fetchNodes = async (kubeconfig: string) => {
-    if (!kubeconfig) return;
-    
-    setIsLoadingNodes(true);
-    console.log("Attempting to fetch nodes with POST request...");
-    
-    try {
-      console.log("Calling nodes API endpoint:", KUBERNETES_API.GET_NODES);
-      
-      const nodesData = await apiRequest(
-        KUBERNETES_API.GET_NODES,
-        'POST',
-        { kubeconfig }
-      );
-      
-      console.log("Nodes API response:", nodesData);
-
-      if (nodesData && nodesData.items) {
-        const nodesList = nodesData.items.map((node: any) => ({
-          name: node.metadata.name,
-          status: node.status?.conditions?.find((c: any) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady',
-          creationTimestamp: node.metadata.creationTimestamp,
-          kubeletVersion: node.status?.nodeInfo?.kubeletVersion,
-          osImage: node.status?.nodeInfo?.osImage,
-          addresses: node.status?.addresses,
-          roles: node.metadata.labels ? 
-            Object.keys(node.metadata.labels)
-              .filter(key => key.startsWith('node-role.kubernetes.io/'))
-              .map(key => key.replace('node-role.kubernetes.io/', ''))
-            : []
-        }));
-        
-        console.log("Processed nodes data:", nodesList);
-        setNodes(nodesList);
-      } else {
-        console.error("API returned a response but no node items were found:", nodesData);
-        setNodes([]);
-      }
-    } catch (error) {
-      console.error('Error fetching nodes:', error);
-      toast.error('Failed to fetch nodes: ' + (error instanceof Error ? error.message : 'Unknown error'));
-      setNodes([]);
-    } finally {
-      setIsLoadingNodes(false);
-    }
   };
 
   // Fetch services for a specific namespace
@@ -1375,48 +1196,37 @@ const ClusterDetails = () => {
     setIsLoadingServices(true);
     
     try {
-      console.log(`Fetching services for namespace ${namespace}`);
       const servicesData = await apiRequest(
         KUBERNETES_API.GET_SERVICES,
-        'POST', // Revert to POST
+        'POST',
         { kubeconfig, namespace }
       );
       
-      console.log('Services data received:', servicesData);
-      
       if (servicesData && servicesData.items) {
-        // Transform the raw service data to ensure consistent structure
-        const transformedServices = servicesData.items.map((service: any) => {
-          // Extract service ports from spec.ports if available
-          const ports = service.spec?.ports ? 
-            service.spec.ports.map((port: any) => ({
-              port: port.port || 0,
-              protocol: port.protocol || 'TCP',
-              nodePort: port.nodePort || null,
-            })) : [];
-          
-          return {
-            name: service.metadata?.name || 'Unknown',
-            namespace: service.metadata?.namespace || namespace,
-            type: service.spec?.type || 'ClusterIP',
-            clusterIP: service.spec?.clusterIP || 'None',
+        const servicesList = servicesData.items.map((service: any) => ({
+          name: service.metadata.name,
+          namespace: service.metadata.namespace,
+          type: service.spec.type,
+          clusterIP: service.spec.clusterIP,
             externalIP: service.status?.loadBalancer?.ingress?.[0]?.ip || 
-                       service.status?.loadBalancer?.ingress?.[0]?.hostname || null,
-            ports: ports,
-            age: service.metadata?.creationTimestamp ?
-              formatDate(service.metadata.creationTimestamp) : 'Unknown'
-          };
-        });
+                      service.status?.loadBalancer?.ingress?.[0]?.hostname || '-',
+          ports: service.spec.ports ? service.spec.ports.map((port: any) => 
+            `${port.port}${port.name ? ` (${port.name})` : ''}${port.nodePort ? ` → ${port.nodePort}` : ''}`
+          ).join(', ') : '-',
+          selector: service.spec.selector ? 
+            Object.entries(service.spec.selector)
+              .map(([key, value]) => `${key}: ${value}`)
+              .join(', ') : '-',
+          age: formatDate(service.metadata.creationTimestamp)
+        }));
         
-        console.log('Transformed services:', transformedServices);
-        setServices(transformedServices);
+        setServices(servicesList);
       } else {
-        console.warn('No services found or empty response received');
         setServices([]);
       }
     } catch (error) {
-      console.error('Error fetching services for namespace ', namespace, ':', error);
-      toast.error('Failed to fetch services for namespace: ' + namespace);
+      console.error('Error fetching services:', error);
+      toast.error('Failed to fetch services');
       setServices([]);
     } finally {
       setIsLoadingServices(false);
@@ -1438,56 +1248,38 @@ const ClusterDetails = () => {
 
   // Function for manual refresh
   const handleManualRefresh = async () => {
-    if (cluster?.kubeconfig) {
-      try {
-        const status = await fetchClusterStatus(cluster.kubeconfig);
-        setLiveClusterStatus(status);
-        setLastUpdated(new Date().toLocaleTimeString());
-        setLiveStatusError('');
-        setConsecutiveFailures(0); // Reset failure counter on success
-        setConnectionFailed(false); // Reset connection failed flag
-        
-        // If the cluster was previously marked as failed but is now accessible,
-        // update its status back to running
-        if (cluster.status === 'failed') {
-          try {
-            await clusterService.updateCluster(cluster.id, { status: 'running' });
-            setCluster({...cluster, status: 'running'});
-            toast.success(`Cluster "${cluster.name}" is now accessible and marked as running`);
-          } catch (updateError) {
-            console.error('Error updating cluster status:', updateError);
-          }
-        }
-        
-        toast.success('Status refreshed');
-      } catch (error: any) {
-        console.error('Error refreshing live status:', error);
-        
-        // Increment consecutive failures
-        const newFailureCount = consecutiveFailures + 1;
-        setConsecutiveFailures(newFailureCount);
-        setConnectionFailed(true); // Set connection failed flag
-        
-        // Always update local UI immediately on manual refresh error
-        if (cluster && cluster.status !== 'failed') {
-          setCluster({...cluster, status: 'failed' as "running" | "pending" | "failed"});
-        }
-        
-        // Update cluster status to failed on manual refresh failure
-        if ((newFailureCount >= MAX_FAILURES_BEFORE_STATUS_UPDATE || cluster.status === 'running') 
-            && cluster.status !== 'failed') {
-          try {
-            await clusterService.updateCluster(cluster.id, { status: 'failed' });
-            toast.error(`Cluster "${cluster.name}" marked as failed due to connection issues`);
-          } catch (updateError) {
-            console.error('Error updating cluster status:', updateError);
-          }
-        }
-        
-        setLiveStatusError(error.message || 'Failed to refresh live status');
-        setLiveClusterStatus(null);
-        toast.error('Failed to refresh status');
+    if (!cluster?.kubeconfig) {
+      toast.error('Missing kubeconfig, cannot refresh');
+      return;
+    }
+    
+    if (isRefreshing) {
+      toast.info('Already refreshing data, please wait');
+      return;
+    }
+    
+    setIsRefreshing(true);
+    toast.info('Refreshing cluster data...');
+    
+    try {
+      // Fetch cluster-wide resources
+      await fetchNodes(cluster.kubeconfig);
+      
+      // Fetch namespace-specific resources
+      if (selectedNamespace) {
+        await fetchResourcesForNamespace(cluster.kubeconfig, selectedNamespace);
       }
+      
+      // Update the last refreshed timestamp
+      const now = new Date();
+      setLastUpdated(now.toLocaleTimeString());
+      
+      toast.success('Cluster data refreshed successfully');
+    } catch (error) {
+      console.error('Error during manual refresh:', error);
+      toast.error(`Failed to refresh: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -1530,7 +1322,10 @@ const ClusterDetails = () => {
           'POST',
           { kubeconfig } 
         );
+        
         if (metricsData) {
+          console.log('Received metrics data:', metricsData);
+          
           const transformedMetrics = {
             cpu: { 
               used: metricsData.cpuUsage?.used || 0, 
@@ -1554,14 +1349,21 @@ const ClusterDetails = () => {
         console.error('Error fetching metrics:', error);
       }
 
-      // Fetch logs
+      // Fetch recent cluster logs
       try {
         const logsData = await apiRequest(
           KUBERNETES_API.GET_LOGS, 
           'POST',
-          { kubeconfig } 
+          { 
+            kubeconfig,
+            limit: 100, // Fetch the 100 most recent log entries
+            namespace: 'all', // Get logs from all namespaces
+            sinceSeconds: 3600 // Get logs from the last hour
+          } 
         );
+        
         if (logsData && logsData.items) {
+          console.log(`Received ${logsData.items.length} log entries`);
           setLogs(logsData.items); 
         }
       } catch (error) {
@@ -1632,21 +1434,27 @@ const ClusterDetails = () => {
     setMigrationError(null);
     
     try {
-      // Start the migration process using MigrationService
-      const id = await MigrationService.migrateResources(
-        cluster.kubeconfig,
-        targetCluster.kubeconfig,
-        selectedResources,
-        migrationOptions
+      // Start the migration process using the Kubernetes API
+      const migrationResponse = await apiRequest(
+        KUBERNETES_API.MIGRATION_START,
+        'POST',
+        {
+          sourceKubeconfig: cluster.kubeconfig,
+          targetKubeconfig: targetCluster.kubeconfig,
+          resources: selectedResources,
+          options: migrationOptions
+        }
       );
       
-      setMigrationId(id);
-      toast.success(`Migration started with ID: ${id}`);
+      const migrationId = migrationResponse.migrationId;
+      setMigrationId(migrationId);
+      toast.success(`Migration started with ID: ${migrationId}`);
       
       // Poll for migration status
       const statusInterval = setInterval(async () => {
         try {
-          const status = await MigrationService.getMigrationStatus(id);
+          const statusEndpoint = KUBERNETES_API.MIGRATION_STATUS_CHECK(migrationId);
+          const status = await apiRequest(statusEndpoint, 'GET');
           
           // Update progress
           if (status.resourcesTotal > 0) {
@@ -1674,6 +1482,7 @@ const ClusterDetails = () => {
         }
       }, 2000);
       
+      // Return cleanup function
       return () => clearInterval(statusInterval);
     } catch (error: any) {
       setMigrationStatus('failed');
@@ -1694,18 +1503,24 @@ const ClusterDetails = () => {
     
     try {
       // Get selected components
-      const selectedItems: ResourceToMigrate[] = Object.keys(selectedComponents)
+      const selectedItems = Object.keys(selectedComponents)
         .filter(key => selectedComponents[key])
         .map(key => {
           const [kind, namespace, name] = key.split('|');
           return { kind, namespace, name };
         });
       
-      // Generate YAML
-      const yaml = await MigrationService.generateYaml(
-        cluster.kubeconfig,
-        selectedItems
+      // Generate YAML using the KUBERNETES_API
+      const yamlResponse = await apiRequest(
+        KUBERNETES_API.GENERATE_YAML,
+        'POST',
+        {
+          kubeconfig: cluster.kubeconfig,
+          resources: selectedItems
+        }
       );
+      
+      const yaml = yamlResponse.yaml;
       
       // Create a downloadable blob
       const blob = new Blob([yaml], { type: 'text/yaml' });
@@ -1714,18 +1529,19 @@ const ClusterDetails = () => {
       // Create a link and trigger download
       const a = document.createElement('a');
       a.href = url;
-      a.download = `migration-${new Date().toISOString().slice(0, 10)}.yaml`;
+      a.download = `${cluster.name}-resources.yaml`;
       document.body.appendChild(a);
       a.click();
+      
+      // Clean up
       document.body.removeChild(a);
+      URL.revokeObjectURL(url);
       
-      toast.success('YAML generated and downloaded');
-      
-    } catch (error) {
-      console.error('Error generating migration YAML:', error);
-      toast.error('Failed to generate migration YAML');
-    } finally {
       setIsMigrationLoading(false);
+      toast.success('YAML file generated and downloaded successfully');
+    } catch (error: any) {
+      setIsMigrationLoading(false);
+      toast.error(`Failed to generate YAML: ${error.message || 'Unknown error'}`);
     }
   };
   
@@ -1762,6 +1578,111 @@ const ClusterDetails = () => {
       fetchTargetClusters();
     }
   }, [user, cluster, activeTab, targetCluster]);
+
+  // Function to fetch all resources for a namespace
+  const fetchResourcesForNamespace = async (kubeconfig: string, namespace: string) => {
+    if (!kubeconfig || !namespace) {
+      console.error("Cannot fetch resources: missing kubeconfig or namespace");
+      return;
+    }
+    
+    console.log(`Fetching all resources for namespace: ${namespace}`);
+    
+    // Set isRefreshing flag to show loading indicators
+    setIsRefreshing(true);
+    
+    try {
+      // Fetch workloads (pods, deployments, etc.)
+      await fetchWorkloads(kubeconfig, namespace);
+      
+      // Fetch services if needed
+      await fetchServices(kubeconfig, namespace);
+      
+      console.log(`Completed resource fetching for namespace: ${namespace}`);
+    } catch (error) {
+      console.error(`Error fetching resources for namespace ${namespace}:`, error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+  
+  // Function to fetch nodes
+  const fetchNodes = async (kubeconfig: string) => {
+    if (!kubeconfig) return;
+    
+    setIsLoadingNodes(true);
+    console.log("Attempting to fetch nodes with POST request...");
+    
+    try {
+      console.log("Calling nodes API endpoint:", KUBERNETES_API.GET_NODES);
+      
+      const nodesData = await apiRequest(
+        KUBERNETES_API.GET_NODES,
+        'POST',
+        { kubeconfig }
+      );
+      
+      console.log("Nodes API response:", nodesData);
+
+      if (nodesData && nodesData.items) {
+        const nodesList = nodesData.items.map((node: any) => ({
+          name: node.metadata.name,
+          status: node.status?.conditions?.find((c: any) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady',
+          creationTimestamp: node.metadata.creationTimestamp,
+          kubeletVersion: node.status?.nodeInfo?.kubeletVersion,
+          osImage: node.status?.nodeInfo?.osImage,
+          addresses: node.status?.addresses,
+          roles: node.metadata.labels ? 
+            Object.keys(node.metadata.labels)
+              .filter(key => key.startsWith('node-role.kubernetes.io/'))
+              .map(key => key.replace('node-role.kubernetes.io/', ''))
+            : [],
+          cpu: {
+            percent: 0,
+            usage: '0',
+            capacity: '0'
+          },
+          memory: {
+            percent: 0,
+            usage: '0',
+            capacity: '0'
+          },
+          version: node.status?.nodeInfo?.kubeletVersion || 'Unknown'
+        }));
+        
+        console.log("Processed nodes data:", nodesList);
+        setNodes(nodesList);
+        
+        // Update liveClusterStatus with the nodes data
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          nodes: nodesList,
+          kubernetesVersion: nodesList[0]?.kubeletVersion || prevStatus?.kubernetesVersion || 'Unknown'
+        }));
+      } else {
+        console.error("API returned a response but no node items were found:", nodesData);
+        setNodes([]);
+        
+        // Update liveClusterStatus with empty nodes array
+        setLiveClusterStatus(prevStatus => ({
+          ...prevStatus,
+          nodes: []
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching nodes:', error);
+      toast.error('Failed to fetch nodes: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setNodes([]);
+      
+      // Update liveClusterStatus with empty nodes array
+      setLiveClusterStatus(prevStatus => ({
+        ...prevStatus,
+        nodes: []
+      }));
+    } finally {
+      setIsLoadingNodes(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -2024,29 +1945,29 @@ const ClusterDetails = () => {
                             <div className="bg-gray-50 p-4 rounded-md">
                               <h3 className="font-medium text-lg">Nodes</h3>
                               <div className="mt-2">
-                                <div className="text-3xl font-bold">{liveClusterStatus.nodes.length}</div>
+                                <div className="text-3xl font-bold">{liveClusterStatus?.nodes?.length || 0}</div>
                                 <div className="text-sm text-gray-600">
-                                  {liveClusterStatus.nodes.filter((node: any) => node.status === 'Ready').length} Ready / 
-                                  {liveClusterStatus.nodes.filter((node: any) => node.status !== 'Ready').length} Not Ready
+                                  {liveClusterStatus?.nodes?.filter((node: any) => node.status === 'Ready')?.length || 0} Ready / 
+                                  {liveClusterStatus?.nodes?.filter((node: any) => node.status !== 'Ready')?.length || 0} Not Ready
                                 </div>
                               </div>
                             </div>
                             <div className="bg-gray-50 p-4 rounded-md">
                               <h3 className="font-medium text-lg">Pods</h3>
                               <div className="mt-2">
-                                <div className="text-3xl font-bold">{liveClusterStatus.pods.length}</div>
+                                <div className="text-3xl font-bold">{liveClusterStatus?.pods?.length || 0}</div>
                                 <div className="text-sm text-gray-600">
-                                  {liveClusterStatus.pods.filter((pod: any) => pod.status === 'Running').length} Running / 
-                                  {liveClusterStatus.pods.filter((pod: any) => pod.status !== 'Running').length} Other
+                                  {liveClusterStatus?.pods?.filter((pod: any) => pod.status === 'Running')?.length || 0} Running / 
+                                  {liveClusterStatus?.pods?.filter((pod: any) => pod.status !== 'Running')?.length || 0} Other
                                 </div>
                               </div>
                             </div>
                             <div className="bg-gray-50 p-4 rounded-md">
                               <h3 className="font-medium text-lg">Cluster Health</h3>
                               <div className="mt-2">
-                                <div className="text-xl font-bold">{liveClusterStatus.nodes.every((node: any) => node.status === 'Ready') ? 'Healthy' : 'Issues Detected'}</div>
+                                <div className="text-xl font-bold">{liveClusterStatus?.nodes?.every((node: any) => node.status === 'Ready') ? 'Healthy' : 'Issues Detected'}</div>
                                 <div className="text-sm text-gray-600">
-                                  Kubernetes v{liveClusterStatus.kubernetesVersion}
+                                  Kubernetes v{liveClusterStatus?.kubernetesVersion || 'N/A'}
                                 </div>
                               </div>
                             </div>
@@ -2068,8 +1989,65 @@ const ClusterDetails = () => {
                               )}
                             </TabsList>
                             
+                            <TabsContent value="namespaces">
+                              <div className="overflow-x-auto">
+                                {isLoadingNamespaces ? (
+                                  <div className="flex justify-center items-center p-8">
+                                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                  </div>
+                                ) : namespaces.length === 0 ? (
+                                  <div className="text-center p-6">
+                                    <p className="text-gray-500">No namespaces available</p>
+                                  </div>
+                                ) : (
+                                  <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                      <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                      {namespaces.map((ns: any) => (
+                                        <tr key={ns.name}>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ns.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                            <Badge className={
+                                              ns.status === 'Active' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 
+                                              ns.status === 'Terminating' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' : 
+                                              'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
+                                            }>
+                                              {ns.status}
+                                            </Badge>
+                                          </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ns.creationTimestamp}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <Button 
+                                              variant="ghost" 
+                                              size="sm"
+                                              onClick={() => handleNamespaceChange(ns.name)}
+                                              className="text-blue-600 hover:text-blue-800"
+                                            >
+                                              View Resources
+                                            </Button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </TabsContent>
+                            
                             <TabsContent value="nodes">
                               <div className="overflow-x-auto">
+                                {!liveClusterStatus?.nodes || liveClusterStatus.nodes.length === 0 ? (
+                                  <div className="text-center p-6">
+                                    <p className="text-gray-500">No nodes available</p>
+                                  </div>
+                                ) : (
                                 <table className="min-w-full divide-y divide-gray-200">
                                   <thead className="bg-gray-50">
                                     <tr>
@@ -2082,7 +2060,7 @@ const ClusterDetails = () => {
                                     </tr>
                                   </thead>
                                   <tbody className="bg-white divide-y divide-gray-200">
-                                    {liveClusterStatus.nodes.map((node: any) => (
+                                      {liveClusterStatus?.nodes?.map((node: any) => (
                                       <tr key={node.name}>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{node.name}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -2091,30 +2069,30 @@ const ClusterDetails = () => {
                                           </Badge>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                          {node.roles.length > 0 ? node.roles.join(', ') : 'worker'}
+                                            {node.roles?.length > 0 ? node.roles.join(', ') : 'worker'}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{node.version}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                           <div className="flex flex-col">
                                             <div className="flex justify-between mb-1 text-xs">
-                                              <span>{node.cpu.percent}%</span>
-                                              <span>{node.cpu.usage} / {node.cpu.capacity}</span>
+                                                <span>{node.cpu?.percent || 0}%</span>
+                                                <span>{node.cpu?.usage || '0'} / {node.cpu?.capacity || '0'}</span>
                                             </div>
-                                            <Progress value={node.cpu.percent} 
+                                              <Progress value={node.cpu?.percent || 0} 
                                               className="h-2 w-full bg-gray-200" 
-                                              indicatorClassName={`${node.cpu.percent > 80 ? 'bg-red-500' : node.cpu.percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
+                                                indicatorClassName={`${(node.cpu?.percent || 0) > 80 ? 'bg-red-500' : (node.cpu?.percent || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
                                             />
                                           </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                           <div className="flex flex-col">
                                             <div className="flex justify-between mb-1 text-xs">
-                                              <span>{node.memory.percent}%</span>
-                                              <span>{node.memory.usage} / {node.memory.capacity}</span>
+                                                <span>{node.memory?.percent || 0}%</span>
+                                                <span>{node.memory?.usage || '0'} / {node.memory?.capacity || '0'}</span>
                                             </div>
-                                            <Progress value={node.memory.percent} 
+                                              <Progress value={node.memory?.percent || 0} 
                                               className="h-2 w-full bg-gray-200" 
-                                              indicatorClassName={`${node.memory.percent > 80 ? 'bg-red-500' : node.memory.percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
+                                                indicatorClassName={`${(node.memory?.percent || 0) > 80 ? 'bg-red-500' : (node.memory?.percent || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} 
                                             />
                                           </div>
                                         </td>
@@ -2122,6 +2100,7 @@ const ClusterDetails = () => {
                                     ))}
                                   </tbody>
                                 </table>
+                                )}
                               </div>
                             </TabsContent>
                             
@@ -2145,6 +2124,11 @@ const ClusterDetails = () => {
                                 
                                 <TabsContent value="pods">
                                   <div className="overflow-x-auto">
+                                    {!liveClusterStatus?.pods || liveClusterStatus.pods.length === 0 ? (
+                                      <div className="text-center p-6">
+                                        <p className="text-gray-500">No pods available</p>
+                                      </div>
+                                    ) : (
                                     <table className="min-w-full divide-y divide-gray-200">
                                       <thead className="bg-gray-50">
                                         <tr>
@@ -2157,7 +2141,7 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {liveClusterStatus.pods.map((pod: any) => (
+                                          {liveClusterStatus?.pods?.map((pod: any) => (
                                           <tr 
                                             key={`${pod.namespace}-${pod.name}`}
                                             className="hover:bg-gray-50 cursor-pointer"
@@ -2185,6 +2169,7 @@ const ClusterDetails = () => {
                                         ))}
                                       </tbody>
                                     </table>
+                                    )}
                                   </div>
                                 </TabsContent>
                                 
@@ -2202,20 +2187,34 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {deployments.map((deployment: any) => (
+                                        {deployments && deployments.length > 0 ? (
+                                          deployments.map((deployment: any) => (
                                           <tr key={`${deployment.namespace}-${deployment.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{deployment.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.namespace}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {deployment.replicas.current}/{deployment.replicas.desired}
+                                                {typeof deployment.replicas === 'object' && deployment.replicas?.current ? 
+                                                  `${deployment.replicas.current}/${deployment.replicas.desired}` : 
+                                                  typeof deployment.replicas === 'number' ? 
+                                                    `${deployment.availableReplicas || 0}/${deployment.replicas}` : '0/0'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {deployment.replicas.available}/{deployment.replicas.desired}
+                                                {typeof deployment.replicas === 'object' && deployment.replicas?.available ? 
+                                                  `${deployment.replicas.available}/${deployment.replicas.desired}` : 
+                                                  typeof deployment.replicas === 'number' ? 
+                                                    `${deployment.availableReplicas || 0}/${deployment.replicas}` : '0/0'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.strategy}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.age}</td>
                                           </tr>
-                                        ))}
+                                          ))
+                                        ) : (
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No deployments found in this namespace
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2235,16 +2234,34 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {replicaSets.map((rs: any) => (
+                                        {replicaSets && replicaSets.length > 0 ? (
+                                          replicaSets.map((rs: any) => (
                                           <tr key={`${rs.namespace}-${rs.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{rs.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.namespace}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.replicas.desired}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.replicas.current}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {typeof rs.replicas === 'object' && rs.replicas?.desired ? 
+                                                  rs.replicas.desired : 
+                                                  typeof rs.desired === 'number' ? 
+                                                    rs.desired : 0}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {typeof rs.replicas === 'object' && rs.replicas?.current ? 
+                                                  rs.replicas.current : 
+                                                  typeof rs.current === 'number' ? 
+                                                    rs.current : 0}
+                                              </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.ownerReference || '-'}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{rs.age}</td>
                                           </tr>
-                                        ))}
+                                          ))
+                                        ) : (
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No replica sets found in this namespace
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2264,18 +2281,29 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {statefulSets.map((sts: any) => (
+                                        {statefulSets && statefulSets.length > 0 ? (
+                                          statefulSets.map((sts: any) => (
                                           <tr key={`${sts.namespace}-${sts.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sts.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.namespace}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {sts.replicas.current}/{sts.replicas.desired}
+                                                {typeof sts.replicas === 'object' && sts.replicas?.current ? 
+                                                  `${sts.replicas.current}/${sts.replicas.desired}` : 
+                                                  typeof sts.replicas === 'number' ? 
+                                                    `${sts.readyReplicas || 0}/${sts.replicas}` : '0/0'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.serviceName}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.updateStrategy}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.age}</td>
                                           </tr>
-                                        ))}
+                                          ))
+                                        ) : (
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No stateful sets found in this namespace
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2296,7 +2324,8 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {daemonSets.map((ds: any) => (
+                                        {daemonSets && daemonSets.length > 0 ? (
+                                          daemonSets.map((ds: any) => (
                                           <tr key={`${ds.namespace}-${ds.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ds.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.namespace}</td>
@@ -2306,7 +2335,14 @@ const ClusterDetails = () => {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.updateStrategy}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ds.age}</td>
                                           </tr>
-                                        ))}
+                                          ))
+                                        ) : (
+                                          <tr>
+                                            <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No daemon sets found in this namespace
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2327,17 +2363,33 @@ const ClusterDetails = () => {
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {jobs.map((job: any) => (
+                                        {jobs && jobs.length > 0 ? (
+                                          jobs.map((job: any) => (
                                           <tr key={`${job.namespace}-${job.name}`}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{job.name}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.namespace}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.completions}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.active}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.succeeded}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.failed}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <Badge className={job.succeeded > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                                                  {job.succeeded}
+                                                </Badge>
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <Badge className={job.failed > 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}>
+                                                  {job.failed}
+                                                </Badge>
+                                              </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.age}</td>
                                           </tr>
-                                        ))}
+                                          ))
+                                        ) : (
+                                          <tr>
+                                            <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No jobs found in this namespace
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2351,78 +2403,106 @@ const ClusterDetails = () => {
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Suspend</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Suspended</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Schedule</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {cronJobs.map((cj: any) => (
-                                          <tr key={`${cj.namespace}-${cj.name}`}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cj.name}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.namespace}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.schedule}</td>
+                                        {cronJobs && cronJobs.length > 0 ? (
+                                          cronJobs.map((cronJob: any) => (
+                                            <tr key={`${cronJob.namespace}-${cronJob.name}`}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cronJob.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cronJob.namespace}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{cronJob.schedule}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {cj.suspend ? 'Yes' : 'No'}
+                                                <Badge className={cronJob.suspend ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}>
+                                                  {cronJob.suspend ? 'Yes' : 'No'}
+                                                </Badge>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.active}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.lastScheduleTime || '-'}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cj.age}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cronJob.active}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cronJob.lastScheduleTime}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cronJob.age}</td>
                                           </tr>
-                                        ))}
+                                          ))
+                                        ) : (
+                                          <tr>
+                                            <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No cron jobs found in this namespace
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                     </table>
                                   </div>
-                                </TabsContent>
-                              </Tabs>
                             </TabsContent>
                             
-                            <TabsContent value="namespaces">
+                                <TabsContent value="limitranges">
                               <div className="overflow-x-auto">
                                 <table className="min-w-full divide-y divide-gray-200">
                                   <thead className="bg-gray-50">
                                     <tr>
                                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max</th>
+                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Default</th>
                                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
                                     </tr>
                                   </thead>
                                   <tbody className="bg-white divide-y divide-gray-200">
-                                    {namespaces.map((ns: any) => (
-                                      <tr key={ns.name}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ns.name}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                          <Badge className={
-                                            ns.status === 'Active' ? 'bg-green-500' : 
-                                            ns.status === 'Terminating' ? 'bg-red-500' : 'bg-yellow-500'
-                                          }>
-                                            {ns.status}
-                                          </Badge>
+                                        {limitRanges.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
+                                              No LimitRanges found in this namespace
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ns.creationTimestamp}</td>
                                       </tr>
-                                    ))}
+                                        ) : (
+                                          limitRanges.flatMap((limit: any) => 
+                                            (limit.limits || []).map((limitItem: any, index: number) => (
+                                              <tr key={`${limit.namespace}-${limit.name}-${index}`}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{limit.name}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limit.namespace}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.type}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.resource}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.min || '-'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.max || '-'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.default || '-'}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limit.age}</td>
+                                              </tr>
+                                            ))
+                                          )
+                                        )}
                                   </tbody>
                                 </table>
                               </div>
+                                </TabsContent>
+                              </Tabs>
                             </TabsContent>
                             
                             <TabsContent value="networking" className="pt-4">
-                              <div className="mb-4 bg-green-50 dark:bg-green-950/20 p-3 rounded-md border border-green-100 dark:border-green-900/40">
-                                <h3 className="text-sm font-medium text-green-800 dark:text-green-300 flex items-center mb-1">
+                              <div className="mb-4 bg-purple-50 dark:bg-purple-950/20 p-3 rounded-md border border-purple-100 dark:border-purple-900/40">
+                                <h3 className="text-sm font-medium text-purple-800 dark:text-purple-300 flex items-center mb-1">
                                   <Network className="h-4 w-4 mr-2" /> Networking
                                 </h3>
-                                <p className="text-xs text-green-600 dark:text-green-400">Configure network services, load balancing, and external access points.</p>
+                                <p className="text-xs text-purple-600 dark:text-purple-400">Manage networking resources like Services and Ingresses to expose your applications.</p>
                               </div>
-                              <Tabs defaultValue="services" value={networkingTab} onValueChange={setNetworkingTab}>
-                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-green-50 dark:bg-green-950/30 rounded-md p-1 border border-green-100 dark:border-green-900">
+                              <Tabs value={networkingTab} onValueChange={setNetworkingTab}>
+                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-purple-50 dark:bg-purple-950/30 rounded-md p-1 border border-purple-100 dark:border-purple-900">
                                   <TabsTrigger value="services" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Services</TabsTrigger>
                                   <TabsTrigger value="ingresses" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Ingresses</TabsTrigger>
                                 </TabsList>
                                 
                                 <TabsContent value="services">
                                   <div className="overflow-x-auto">
+                                    {isLoadingServices ? (
+                                      <div className="flex justify-center items-center p-8">
+                                        <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+                                      </div>
+                                    ) : services && services.length > 0 ? (
                                     <table className="min-w-full divide-y divide-gray-200">
                                       <thead className="bg-gray-50">
                                         <tr>
@@ -2432,96 +2512,106 @@ const ClusterDetails = () => {
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cluster IP</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">External IP</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ports</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {services.map((svc: any) => (
-                                          <tr key={`${svc.namespace}-${svc.name}`}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{svc.name}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.namespace}</td>
+                                          {services.map((service: any) => (
+                                            <tr key={`${service.namespace}-${service.name}`}>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{service.name}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{service.namespace}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                               <Badge className={
-                                                svc.type === 'LoadBalancer' ? 'bg-blue-100 text-blue-800' :
-                                                svc.type === 'NodePort' ? 'bg-purple-100 text-purple-800' :
-                                                svc.type === 'ExternalName' ? 'bg-yellow-100 text-yellow-800' :
-                                                'bg-gray-100 text-gray-800'
-                                              }>
-                                                {svc.type}
+                                                  service.type === 'LoadBalancer' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300' : 
+                                                  service.type === 'NodePort' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' : 
+                                                  'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+                                                }>
+                                                  {service.type}
                                               </Badge>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.clusterIP}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{svc.externalIP || '-'}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                              {svc.ports && svc.ports.map ? svc.ports.map((port: any) => (
-                                                <div key={`${port.port}-${port.protocol}`}>
-                                                  {port.port}:{port.nodePort || port.port}/{port.protocol}
-                                                </div>
-                                              )) : '-'}
-                                            </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{service.clusterIP}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{service.externalIP}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{service.ports}</td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{service.age}</td>
                                           </tr>
                                         ))}
                                       </tbody>
                                     </table>
+                                    ) : (
+                                      <div className="text-center p-6">
+                                        <p className="text-gray-500">No services found in this namespace</p>
+                                      </div>
+                                    )}
                                   </div>
                                 </TabsContent>
                                 
                                 <TabsContent value="ingresses">
                                   <div className="overflow-x-auto">
+                                    {isLoadingNetworking ? (
+                                      <div className="flex justify-center items-center p-8">
+                                        <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+                                      </div>
+                                    ) : ingresses && ingresses.length > 0 ? (
                                     <table className="min-w-full divide-y divide-gray-200">
                                       <thead className="bg-gray-50">
                                         <tr>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hosts</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ingress Class</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TLS</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paths</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
-                                        {ingresses.length === 0 ? (
-                                          <tr>
-                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
-                                              No ingress resources found in this namespace
-                                            </td>
-                                          </tr>
-                                        ) : (
-                                          ingresses.map((ingress: any) => (
+                                          {ingresses.map((ingress: any) => (
                                             <tr key={`${ingress.namespace}-${ingress.name}`}>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ingress.name}</td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ingress.namespace}</td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {ingress.hosts?.map((host: string) => (
-                                                  <div key={host}>{host}</div>
-                                                )) || '-'}
+                                                {Array.isArray(ingress.hosts) ? ingress.hosts.map((host: string, index: number) => (
+                                                  <div key={index} className="font-mono text-xs">{host}</div>
+                                                )) : ingress.hosts || '-'}
                                               </td>
-                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ingress.ingressClassName || '-'}</td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <Badge className={
+                                                  ingress.tls ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 
+                                                  'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300'
+                                                }>
                                                 {ingress.tls ? 'Enabled' : 'Disabled'}
+                                                </Badge>
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {Array.isArray(ingress.paths) ? ingress.paths.map((path: string, index: number) => (
+                                                  <div key={index} className="font-mono text-xs">{path}</div>
+                                                )) : ingress.paths || '-'}
                                               </td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ingress.age}</td>
                                             </tr>
-                                          ))
-                                        )}
+                                          ))}
                                       </tbody>
                                     </table>
+                                    ) : (
+                                      <div className="text-center p-6">
+                                        <p className="text-gray-500">No ingresses found in this namespace</p>
+                                      </div>
+                                    )}
                                   </div>
                                 </TabsContent>
                               </Tabs>
                             </TabsContent>
+                            
                             <TabsContent value="configurations" className="pt-4">
-                              <div className="mb-4 bg-purple-50 dark:bg-purple-950/20 p-3 rounded-md border border-purple-100 dark:border-purple-900/40">
-                                <h3 className="text-sm font-medium text-purple-800 dark:text-purple-300 flex items-center mb-1">
+                              <div className="mb-4 bg-amber-50 dark:bg-amber-950/20 p-3 rounded-md border border-amber-100 dark:border-amber-900/40">
+                                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 flex items-center mb-1">
                                   <Database className="h-4 w-4 mr-2" /> Configurations
                                 </h3>
-                                <p className="text-xs text-purple-600 dark:text-purple-400">Manage configuration data, secrets, and resource constraints for your applications.</p>
+                                <p className="text-xs text-amber-600 dark:text-amber-400">Manage configuration resources like ConfigMaps and Secrets for your cluster's applications.</p>
                               </div>
                               <Tabs value={configurationsTab} onValueChange={setConfigurationsTab}>
-                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-purple-50 dark:bg-purple-950/30 rounded-md p-1 border border-purple-100 dark:border-purple-900">
+                                <TabsList className="flex overflow-x-auto py-1 mb-4 space-x-1 bg-amber-50 dark:bg-amber-950/30 rounded-md p-1 border border-amber-100 dark:border-amber-900">
                                   <TabsTrigger value="configmaps" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">ConfigMaps</TabsTrigger>
                                   <TabsTrigger value="secrets" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">Secrets</TabsTrigger>
-                                  <TabsTrigger value="resourcequotas" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">ResourceQuotas</TabsTrigger>
-                                  <TabsTrigger value="limitranges" className="text-sm py-1 px-3 bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800">LimitRanges</TabsTrigger>
                                 </TabsList>
                                 
                                 <TabsContent value="configmaps">
@@ -2565,14 +2655,13 @@ const ClusterDetails = () => {
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data Items</th>
                                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
                                         </tr>
                                       </thead>
                                       <tbody className="bg-white divide-y divide-gray-200">
                                         {secrets.length === 0 ? (
                                           <tr>
-                                            <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
+                                            <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500">
                                               No Secrets found in this namespace
                                             </td>
                                           </tr>
@@ -2582,92 +2671,9 @@ const ClusterDetails = () => {
                                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{secret.name}</td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.namespace}</td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.type}</td>
-                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.dataCount || 0}</td>
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.age}</td>
                                             </tr>
                                           ))
-                                        )}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </TabsContent>
-                                
-                                <TabsContent value="resourcequotas">
-                                  <div className="overflow-x-auto">
-                                    <table className="min-w-full divide-y divide-gray-200">
-                                      <thead className="bg-gray-50">
-                                        <tr>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Used</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hard Limit</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="bg-white divide-y divide-gray-200">
-                                        {resourceQuotas.length === 0 ? (
-                                          <tr>
-                                            <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
-                                              No ResourceQuotas found in this namespace
-                                            </td>
-                                          </tr>
-                                        ) : (
-                                          resourceQuotas.flatMap((quota: any) => 
-                                            Object.entries(quota.resources || {}).map(([resource, values]: [string, any]) => (
-                                              <tr key={`${quota.namespace}-${quota.name}-${resource}`}>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{quota.name}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{quota.namespace}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{resource}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{values.used || '0'}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{values.hard || 'Not Set'}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{quota.age}</td>
-                                              </tr>
-                                            ))
-                                          )
-                                        )}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </TabsContent>
-                                
-                                <TabsContent value="limitranges">
-                                  <div className="overflow-x-auto">
-                                    <table className="min-w-full divide-y divide-gray-200">
-                                      <thead className="bg-gray-50">
-                                        <tr>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resource</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Default</th>
-                                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="bg-white divide-y divide-gray-200">
-                                        {limitRanges.length === 0 ? (
-                                          <tr>
-                                            <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
-                                              No LimitRanges found in this namespace
-                                            </td>
-                                          </tr>
-                                        ) : (
-                                          limitRanges.flatMap((limit: any) => 
-                                            (limit.limits || []).map((limitItem: any, index: number) => (
-                                              <tr key={`${limit.namespace}-${limit.name}-${index}`}>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{limit.name}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limit.namespace}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.type}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.resource}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.min || '-'}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.max || '-'}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limitItem.default || '-'}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{limit.age}</td>
-                                              </tr>
-                                            ))
-                                          )
                                         )}
                                       </tbody>
                                     </table>
@@ -3197,7 +3203,10 @@ const ClusterDetails = () => {
                                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{deployment.name}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.namespace}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {deployment.replicas.current}/{deployment.replicas.desired}
+                                            {typeof deployment.replicas === 'object' && deployment.replicas?.current ? 
+                                              `${deployment.replicas.current}/${deployment.replicas.desired}` : 
+                                              typeof deployment.replicas === 'number' ? 
+                                                `${deployment.availableReplicas || 0}/${deployment.replicas}` : '0/0'}
                                           </td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{deployment.age}</td>
                                         </tr>
@@ -3213,8 +3222,13 @@ const ClusterDetails = () => {
                                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{sts.name}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.namespace}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {sts.replicas.current}/{sts.replicas.desired}
+                                            {typeof sts.replicas === 'object' && sts.replicas?.current ? 
+                                              `${sts.replicas.current}/${sts.replicas.desired}` : 
+                                              typeof sts.replicas === 'number' ? 
+                                                `${sts.readyReplicas || 0}/${sts.replicas}` : '0/0'}
                                           </td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.serviceName}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.updateStrategy}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{sts.age}</td>
                                         </tr>
                                       ))}
@@ -3283,6 +3297,17 @@ const ClusterDetails = () => {
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.namespace}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.type}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{secret.age}</td>
+                                        </tr>
+                                      ))}
+                                      {resourceType === 'jobs' && jobs.map((job: any) => (
+                                        <tr key={`${job.namespace}-${job.name}`}>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{job.name}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.namespace}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.completions}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.active}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.succeeded}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.failed}</td>
+                                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.age}</td>
                                         </tr>
                                       ))}
                                     </tbody>

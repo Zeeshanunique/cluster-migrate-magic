@@ -41,7 +41,7 @@ export const KUBERNETES_API = {
   GET_LOGS: `${API_BASE_URL}/kube-migrate/k8s/logs`,
   
   // Debug and utility
-  DEBUG_TOKEN: `${API_BASE_URL}/kube-migrate/debug/token`,
+  DEBUG_TOKEN: `${API_BASE_URL}/kube-migrate/debug/validate-token`,
   GET_KUBECONFIG_DETAILS: `${API_BASE_URL}/kube-migrate/k8s/kubeconfig-details`,
   
   // Migration utilities
@@ -83,6 +83,7 @@ const DEVELOPMENT_ENDPOINTS = [
   '/kube-migrate/k8s/storageclasses',
   '/kube-migrate/k8s/metrics',
   '/kube-migrate/k8s/logs',
+  '/kube-migrate/debug/validate-token',
   // Add tenant endpoints to development endpoints
   '/kube-migrate/k8s/tenant/namespaces',
   '/kube-migrate/k8s/tenant/pods',
