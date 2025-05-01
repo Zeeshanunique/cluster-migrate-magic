@@ -81,9 +81,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signIn = async (credentials: UserCredentials) => {
     try {
       console.log('Signing in with Cognito...');
-      const { user, session } = await authService.signIn(credentials);
-      console.log('Sign in successful:', user ? `User ID: ${user.id}` : 'No user returned');
-      return { user, session };
+      const result = await authService.signIn(credentials);
+      console.log('Sign in successful:', result.user ? `User ID: ${result.user.id}` : 'No user returned');
+      
+      // Update state with the user and session data
+      if (result.user && result.session) {
+        setUser(result.user);
+        setSession(result.session);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error signing in with Cognito:', error);
       return { user: null, session: null };
@@ -94,9 +101,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signUp = async (credentials: UserRegistration) => {
     try {
       console.log('Signing up with Cognito...');
-      const { user, session } = await authService.signUp(credentials);
-      console.log('Sign up successful:', user ? `User ID: ${user.id}` : 'No user returned');
-      return { user, session };
+      const result = await authService.signUp(credentials);
+      console.log('Sign up successful:', result.user ? `User ID: ${result.user.id}` : 'No user returned');
+      
+      // Update state with the user and session data if available
+      if (result.user && result.session) {
+        setUser(result.user);
+        setSession(result.session);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error signing up with Cognito:', error);
       return { user: null, session: null };

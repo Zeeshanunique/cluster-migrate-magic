@@ -18,6 +18,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { useAuth } from '@/contexts/AuthContext';
+import { UserCredentials } from '@/utils/dynamodb';
 
 // Define form schema
 const formSchema = z.object({
@@ -46,11 +47,21 @@ export default function SignInForm() {
   const onSubmit = async (data: FormValues) => {
     setIsLoading(true);
     try {
-      const { user } = await signIn(data);
+      // Make sure we pass a complete UserCredentials object
+      const credentials: UserCredentials = {
+        email: data.email,
+        password: data.password
+      };
       
-      if (user) {
+      const result = await signIn(credentials);
+      
+      if (result.user) {
         toast.success('Signed in successfully');
-        navigate('/dashboard');
+        
+        // Add a small delay to ensure state is updated before navigation
+        setTimeout(() => {
+          navigate('/dashboard', { replace: true });
+        }, 300);
       } else {
         toast.error('Invalid email or password');
       }
