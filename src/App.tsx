@@ -9,7 +9,6 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import Migration from "./pages/Migration";
-import Checkpoints from "./pages/Checkpoints";
 import CreateCluster from "./pages/CreateCluster";
 import AddCluster from "./pages/AddCluster";
 import ClusterDetails from "./pages/ClusterDetails";
@@ -51,7 +50,6 @@ const App = () => (
               <Route path="/sign-up" element={<SignUp />} />
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/migration" element={<ProtectedRoute><Migration /></ProtectedRoute>} />
-              <Route path="/checkpoints" element={<ProtectedRoute><Checkpoints /></ProtectedRoute>} />
               <Route path="/create-cluster" element={<Navigate to="/add-cluster" replace />} />
               <Route path="/add-cluster" element={<ProtectedRoute><AddCluster /></ProtectedRoute>} />
               <Route path="/cluster/:id" element={<ProtectedRoute><ClusterDetails /></ProtectedRoute>} />

@@ -13,12 +13,21 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
+// Extend the User type to include user_metadata
+interface ExtendedUser {
+  user_metadata?: {
+    name?: string;
+  };
+}
+
 const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  // Cast user to include user_metadata
+  const extendedUser = user as (typeof user & ExtendedUser);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -40,10 +49,10 @@ const Navbar = () => {
 
   // Get user initials for avatar
   const getUserInitials = () => {
-    if (!user?.email) return '?';
+    if (!extendedUser?.email) return '?';
     
     // Try to get initials from user metadata if available
-    const userName = user.user_metadata?.name;
+    const userName = extendedUser.user_metadata?.name;
     if (userName) {
       return userName.split(' ')
         .map((name: string) => name[0])
@@ -53,7 +62,7 @@ const Navbar = () => {
     }
     
     // Fallback to first letter of email
-    return user.email[0].toUpperCase();
+    return extendedUser.email[0].toUpperCase();
   };
 
   return (
@@ -86,7 +95,7 @@ const Navbar = () => {
             Home
           </Link>
           
-          {user && (
+          {extendedUser && (
             <Link 
               to="/dashboard" 
               className={`text-sm font-medium transition-colors hover:text-primary ${
@@ -107,11 +116,6 @@ const Navbar = () => {
               <DropdownMenuItem asChild onClick={() => navigate('/migration')}>
                 <Link to="/migration" className="w-full cursor-pointer">
                   Cluster Migration
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild onClick={() => navigate('/checkpoints')}>
-                <Link to="/checkpoints" className="w-full cursor-pointer">
-                  Checkpoints
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild onClick={() => navigate('/multi-tenant')}>
@@ -136,7 +140,7 @@ const Navbar = () => {
         </nav>
         
         <div className="hidden md:flex items-center space-x-4">
-          {user ? (
+          {extendedUser ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Avatar className="h-9 w-9 cursor-pointer hover:opacity-80">
@@ -148,9 +152,9 @@ const Navbar = () => {
               <DropdownMenuContent align="end">
                 <div className="flex items-center justify-start gap-2 p-2">
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">{user.email}</p>
+                    <p className="text-sm font-medium leading-none">{extendedUser?.email}</p>
                     <p className="text-xs leading-none text-muted-foreground">
-                      {user.user_metadata?.name || 'User'}
+                      {extendedUser?.user_metadata?.name || 'User'}
                     </p>
                   </div>
                 </div>
@@ -201,7 +205,7 @@ const Navbar = () => {
               Home
             </Link>
             
-            {user && (
+            {extendedUser && (
               <>
                 <Link 
                   to="/dashboard" 
@@ -214,12 +218,6 @@ const Navbar = () => {
                   className="text-sm font-medium py-2 transition-colors hover:text-primary"
                 >
                   Cluster Migration
-                </Link>
-                <Link 
-                  to="/checkpoints" 
-                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
-                >
-                  Checkpoints
                 </Link>
                 <Link 
                   to="/multi-tenant" 
@@ -244,7 +242,7 @@ const Navbar = () => {
             </Link>
             
             <div className="pt-4 flex flex-col space-y-2">
-              {user ? (
+              {extendedUser ? (
                 <>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
@@ -254,7 +252,7 @@ const Navbar = () => {
                         </AvatarFallback>
                       </Avatar>
                       <div className="text-sm font-medium">
-                        {user.user_metadata?.name || user.email}
+                        {extendedUser?.user_metadata?.name || extendedUser?.email}
                       </div>
                     </div>
                   </div>

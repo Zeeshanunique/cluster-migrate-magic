@@ -3399,13 +3399,7 @@ const ClusterDetails = () => {
               </div>
               
               <div className="mt-8">
-                <Button 
-                  variant="outline" 
-                  className="mr-4" 
-                  onClick={() => navigate('/checkpoints')}
-                >
-                  View Checkpoints
-                </Button>
+                {/* Removed View Checkpoints button */}
                 
                 {/* Show migration button for single clusters */}
                 {cluster?.type === 'single' && (

@@ -60,10 +60,6 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
     navigate(`/migration?cluster=${cluster.id}`);
   };
   
-  const handleViewCheckpoints = () => {
-    navigate('/checkpoints');
-  };
-  
   const handleViewDetails = (e: React.MouseEvent) => {
     // Prevent event from bubbling up to the card's onClick
     e.stopPropagation();
@@ -200,10 +196,6 @@ const ClusterCard = ({ cluster, onDelete, onRestart }: ClusterCardProps) => {
                 <DropdownMenuItem onClick={handleCheckConnectivity}>
                   <Globe className="mr-2 h-4 w-4" /> 
                   Check Connectivity
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleViewCheckpoints}>
-                  <CheckSquare className="mr-2 h-4 w-4" /> 
-                  View Checkpoints
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleDownloadConfig}>
                   <Download className="mr-2 h-4 w-4" /> 
