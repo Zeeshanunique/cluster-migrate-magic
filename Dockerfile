@@ -11,6 +11,9 @@ RUN npm ci
 # Copy the rest of the frontend source code
 COPY . .
 
+# Fix Express version compatibility issue
+RUN npm uninstall express && npm install express@4.18.2 --save
+
 # Build the frontend for production
 RUN npm run build:prod
 
@@ -22,6 +25,9 @@ WORKDIR /app
 # Install production dependencies
 COPY package.json package-lock.json ./
 RUN npm ci --only=production
+
+# Fix Express version compatibility issue
+RUN npm uninstall express && npm install express@4.18.2 --save
 
 # Install curl for health checks
 RUN apk --no-cache add curl

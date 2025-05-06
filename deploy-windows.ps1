@@ -29,6 +29,11 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
     exit 1
 }
 
+# Fix Express version compatibility issue
+Write-Host "Fixing Express version compatibility..." -ForegroundColor Green
+npm uninstall express
+npm install express@4.18.2 --save
+
 # Install dependencies
 Write-Host "Installing dependencies..." -ForegroundColor Green
 npm ci

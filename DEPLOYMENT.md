@@ -201,6 +201,71 @@ For Windows servers:
 - **Backend connection issues**: Verify the server is running with `systemctl status kube-migrate` or checking Windows services
 - **API errors**: Check the server logs with `journalctl -u kube-migrate -f` or Windows Event Viewer
 
+## Express.js Compatibility Issues
+
+When deploying Kube-Migrate, you may encounter the following error related to Express.js version:
+
+```
+TypeError: Missing parameter name at XX: https://git.new/pathToRegexpError
+```
+
+This occurs because the application uses Express.js 5.x (alpha), which has stricter route parameter validation than the stable 4.x versions. Here's how to fix it:
+
+### For New Deployments
+
+The updated deployment scripts now automatically fix this issue by downgrading Express.js to version 4.18.2.
+
+### For Existing Deployments
+
+If you're experiencing this error on an already deployed instance, use one of these fix scripts:
+
+#### Linux/EC2 Fix
+
+Run this command to download and execute the fix script:
+
+```bash
+curl -O https://raw.githubusercontent.com/yourusername/cluster-migrate-magic/main/fix-express-version.sh
+chmod +x fix-express-version.sh
+sudo ./fix-express-version.sh
+```
+
+#### Windows Fix
+
+Run these PowerShell commands as Administrator:
+
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/yourusername/cluster-migrate-magic/main/fix-express-windows.ps1" -OutFile "fix-express-windows.ps1"
+.\fix-express-windows.ps1
+```
+
+### Manual Fix
+
+If the scripts don't work for your environment:
+
+1. Stop the service:
+   ```bash
+   # Linux
+   sudo systemctl stop kube-migrate
+   
+   # Windows PowerShell
+   Stop-Service KubeMigrate
+   ```
+
+2. Navigate to your installation directory and run:
+   ```bash
+   npm uninstall express
+   npm install express@4.18.2 --save
+   ```
+
+3. Start the service:
+   ```bash
+   # Linux
+   sudo systemctl start kube-migrate
+   
+   # Windows PowerShell
+   Start-Service KubeMigrate
+   ```
+
 ## Upgrading
 
 1. Pull the latest changes:

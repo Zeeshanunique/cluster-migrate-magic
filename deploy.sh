@@ -58,6 +58,11 @@ CURRENT_DIR=$(pwd)
 cp -r "$CURRENT_DIR"/* "$DEPLOY_DIR"
 cd "$DEPLOY_DIR"
 
+# Fix Express version compatibility issue (downgrade to 4.x)
+echo "Fixing Express version compatibility..."
+npm uninstall express
+npm install express@4.18.2 --save
+
 # Install dependencies
 echo "Installing dependencies..."
 npm ci
