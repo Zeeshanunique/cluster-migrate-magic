@@ -16,7 +16,11 @@
     "preview": "vite preview",
     "start": "NODE_ENV=production node server/proxy.js",
     "start:win": "set NODE_ENV=production && set BACKEND_PORT=8089 && node server/proxy.js",
-    "setup:prod": "bash setup-production.sh"
+    "setup:prod": "bash setup-production.sh",
+    "deploy:docker": "docker-compose up -d",
+    "deploy:linux": "sudo bash deploy.sh",
+    "deploy:windows": "powershell -ExecutionPolicy Bypass -File deploy-windows.ps1",
+    "build:start": "npm run build:prod && npm run start:win"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.797.0",

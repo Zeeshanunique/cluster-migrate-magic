@@ -7,8 +7,8 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const isProduction = mode === 'production';
-  const FRONTEND_PORT = env.FRONTEND_PORT || 3009;
-  const BACKEND_PORT = env.BACKEND_PORT || 8089;
+  const FRONTEND_PORT = parseInt(env.FRONTEND_PORT || '3009', 10);
+  const BACKEND_PORT = parseInt(env.BACKEND_PORT || '8089', 10);
   
   return {
     base: isProduction ? '/kube-migrate/' : '/',

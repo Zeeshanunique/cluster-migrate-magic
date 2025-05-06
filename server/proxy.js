@@ -128,6 +128,24 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// Serve static files from the dist directory if we're also serving the frontend
+// This allows the server to serve both the API and the frontend
+const distDir = path.join(__dirname, '../dist');
+if (fs.existsSync(distDir)) {
+  console.log(`Found frontend distribution at ${distDir}, serving static files`);
+  app.use('/kube-migrate', express.static(distDir));
+  
+  // For any frontend routes, serve the index.html file
+  app.get('/kube-migrate/*', (req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
+
 // Redirect legacy API endpoints to the new kube-migrate endpoints
 app.use((req, res, next) => {
   if (req.url.startsWith('/api/')) {
