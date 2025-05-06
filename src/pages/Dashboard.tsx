@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import ClusterCard from '@/components/clusters/ClusterCard';
+import CognitoConfig from '@/components/auth/CognitoConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
@@ -19,7 +20,12 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { Plus, Search, Filter, Loader2, AlertCircle } from 'lucide-react';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Plus, Search, Filter, Loader2, AlertCircle, ChevronDown, ChevronUp, Database } from 'lucide-react';
 import { toast } from 'sonner';
 import { Cluster, clusterService } from '@/utils/dynamodb';
 
@@ -170,6 +176,22 @@ const Dashboard = () => {
               </div>
             </div>
           )}
+          
+          {/* AWS Cognito Configuration */}
+          <Collapsible className="mb-8 border border-gray-200 dark:border-gray-700 rounded-lg shadow-subtle">
+            <CollapsibleTrigger className="flex items-center justify-between w-full p-4 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 rounded-t-lg">
+              <div className="flex items-center">
+                <Database className="h-5 w-5 mr-2 text-primary" />
+                <h3 className="font-medium">AWS Cognito Configuration</h3>
+              </div>
+              <div className="text-gray-500">
+                <ChevronDown className="h-5 w-5" />
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="p-4 bg-white dark:bg-gray-800">
+              <CognitoConfig />
+            </CollapsibleContent>
+          </Collapsible>
           
           <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-subtle border border-gray-200 dark:border-gray-700">

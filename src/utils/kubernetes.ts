@@ -3,8 +3,9 @@ import YAML from 'yaml';
 import { Base64 } from 'js-base64';
 import { KUBERNETES_API, apiRequest } from './api';
 
-// Proxy configuration
-const API_PROXY_URL = import.meta.env.VITE_API_PROXY_URL || 'http://localhost:3001';
+// Update lines containing localhost:3001
+const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || 8089;
+const API_PROXY_URL = import.meta.env.VITE_API_PROXY_URL || `http://localhost:${BACKEND_PORT}`;
 
 // Interfaces for Kubernetes resources using standard K8s hierarchy
 
@@ -395,7 +396,7 @@ export async function checkK8sToken(kubeconfig: string): Promise<boolean> {
  */
 export async function getK8sNodes(kubeconfig: string): Promise<any> {
   try {
-    const response = await fetch('http://localhost:3001/kube-migrate/k8s/nodes', {
+    const response = await fetch(`${API_PROXY_URL}/kube-migrate/k8s/nodes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -470,7 +471,7 @@ export async function getClusterInfo(kubeconfig: string): Promise<any> {
  */
 export async function debugKubeconfig(kubeconfig: string): Promise<any> {
   try {
-    const response = await fetch('http://localhost:3001/kube-migrate/debug/kubeconfig', {
+    const response = await fetch(`${API_PROXY_URL}/kube-migrate/debug/kubeconfig`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

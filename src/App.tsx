@@ -16,6 +16,7 @@ import MultiTenant from "./pages/MultiTenant";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import NotFound from "./pages/NotFound";
+import MigrationLogs from "./pages/MigrationLogs";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,8 @@ const App = () => (
               <Route path="/add-cluster" element={<ProtectedRoute><AddCluster /></ProtectedRoute>} />
               <Route path="/cluster/:id" element={<ProtectedRoute><ClusterDetails /></ProtectedRoute>} />
               <Route path="/multi-tenant" element={<ProtectedRoute><MultiTenant /></ProtectedRoute>} />
+              <Route path="/logs" element={<ProtectedRoute><MigrationLogs /></ProtectedRoute>} />
+              <Route path="/migration-logs" element={<ProtectedRoute><MigrationLogs /></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AnimatePresence>

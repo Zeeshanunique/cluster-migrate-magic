@@ -1,26 +1,34 @@
-version: '3.8'
+version: '3'
 
 services:
-  kube-migrate-app:
+  kube-migrate:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      - "8089:8089"
     environment:
       - NODE_ENV=production
-      - PORT=3001
-      - ALLOWED_ORIGIN=*
-      # Add other environment variables as needed
-      # - VITE_SUPABASE_URL=your_supabase_url
-      # - VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-      # - AWS_ACCESS_KEY_ID=your_aws_access_key_id
-      # - AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
-    restart: unless-stopped
+      - DEPLOYMENT=production
+      - PORT=8089
+      - BACKEND_PORT=8089
+      - FRONTEND_PORT=3009
+      - VITE_K8S_PROXY_URL=/kube-migrate
+      - VITE_API_PROXY_URL=/kube-migrate
+      - VITE_AWS_REGION=us-east-1
+      - VITE_COGNITO_USER_POOL_ID=us-east-1_0phCrx0Ao
+      - VITE_COGNITO_CLIENT_ID=4qfs9mvg1phde56htj0d3b3ku9
+      - VITE_DYNAMODB_REGION=us-east-1
+    restart: always
     volumes:
-      # Optional: Mount kubeconfig directory if needed
-      # - /path/to/kubeconfig:/root/.kube
-      - logs:/app/logs
+      - kube-config:/app/.kube
+    networks:
+      - kube-migrate-network
+
+networks:
+  kube-migrate-network:
+    driver: bridge
 
 volumes:
-  logs:
+  kube-config:
+    driver: local

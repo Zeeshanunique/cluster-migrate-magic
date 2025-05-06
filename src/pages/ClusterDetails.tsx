@@ -607,7 +607,10 @@ const ClusterDetails = () => {
         cluster.kubeconfig,
         targetCluster.kubeconfig,
         selectedResources,
-        migrationOptions
+        migrationOptions,
+        { id: cluster.id, name: cluster.name },
+        { id: targetCluster.id, name: targetCluster.name },
+        user?.id || ''
       );
       
       setMigrationId(id);

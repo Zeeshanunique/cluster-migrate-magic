@@ -18,7 +18,7 @@ type AuthContextType = {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signIn: (credentials: UserCredentials) => Promise<{ user: User | null; session: Session | null }>;
+  signIn: (credentials: UserCredentials) => Promise<{ user: User | null; session: Session | null; error?: string }>;
   signUp: (credentials: UserRegistration) => Promise<{ user: User | null; session: Session | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
@@ -47,9 +47,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSession(session);
         if (session) {
           console.log('Session found, getting user details...');
-          const user = await authService.getUser();
-          console.log('User details retrieved:', user ? `ID: ${user.id}` : 'No user');
-          setUser(user);
+          try {
+            const user = await authService.getUser();
+            console.log('User details retrieved:', user ? `ID: ${user.id}` : 'No user');
+            setUser(user);
+          } catch (error) {
+            console.error('Error getting user details, trying to refresh token:', error);
+            // Try to refresh the token if getting user details fails
+            const refreshed = await authService.refreshToken();
+            if (refreshed) {
+              console.log('Token refreshed, trying to get user details again');
+              const user = await authService.getUser();
+              setUser(user);
+            } else {
+              console.log('Token refresh failed, user needs to login again');
+              setUser(null);
+            }
+          }
         } else {
           console.log('No active session found');
           setUser(null);
@@ -91,9 +105,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
       
       return result;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error signing in with Cognito:', error);
-      return { user: null, session: null };
+      return { 
+        user: null, 
+        session: null,
+        error: error.message || 'Unknown error occurred during sign in'
+      };
     }
   };
 

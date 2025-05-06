@@ -1,5 +1,7 @@
 // API endpoints management
-const API_BASE_URL = 'http://localhost:3001';
+// Get port from environment variables with fallback to 8089
+const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || 8089;
+export const API_BASE_URL = `http://localhost:${BACKEND_PORT}`;
 
 // Kubernetes API endpoints
 export const KUBERNETES_API = {

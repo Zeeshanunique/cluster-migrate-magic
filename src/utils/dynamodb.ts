@@ -15,33 +15,76 @@ import {
   ForgotPasswordCommand,
   ConfirmForgotPasswordCommand,
   GlobalSignOutCommand,
-  GetUserCommand
+  GetUserCommand,
+  AdminGetUserCommand,
+  AdminCreateUserCommand,
+  AdminSetUserPasswordCommand,
+  AdminConfirmSignUpCommand
 } from '@aws-sdk/client-cognito-identity-provider';
 import { toast } from 'sonner';
+import {
+  ListTablesCommand,
+  ScanCommand as DynamoDBScanCommand,
+  PutItemCommand,
+  DeleteItemCommand,
+  GetItemCommand,
+  BatchWriteItemCommand,
+  CreateTableCommand,
+  DescribeTableCommand,
+  UpdateItemCommand,
+  AttributeValue,
+  ScalarAttributeType,
+  KeyType
+} from '@aws-sdk/client-dynamodb';
 
 // Get AWS credentials from environment variables - make sure these are properly set in .env
-const region = import.meta.env.VITE_AWS_REGION || 'us-east-1';
+const region = import.meta.env.VITE_DYNAMODB_REGION || import.meta.env.VITE_AWS_REGION || 'us-east-1';
 const accessKeyId = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
 const secretAccessKey = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
+const isProduction = import.meta.env.PROD === true;
 
 // Log AWS configuration
 console.log('AWS Configuration:');
 console.log('Region:', region);
-console.log('Access Key ID present:', !!accessKeyId);
-console.log('Secret Access Key present:', !!secretAccessKey);
+console.log('Environment:', isProduction ? 'Production' : 'Development');
 
-if (!accessKeyId || !secretAccessKey) {
-  console.warn('AWS credentials are missing - DynamoDB operations will fail!');
+// Initialize DynamoDB clients based on environment
+let dynamodbClient;
+let cognitoClient;
+
+if (isProduction) {
+  console.log('Using IAM Role from EC2 instance for AWS authentication');
+  
+  // In production, use the EC2 instance role (no explicit credentials)
+  dynamodbClient = new DynamoDBClient({ region });
+  cognitoClient = new CognitoIdentityProviderClient({ region });
+} else {
+  console.log('Using explicit AWS credentials for AWS authentication');
+  console.log('Access Key ID present:', !!accessKeyId);
+  console.log('Secret Access Key present:', !!secretAccessKey);
+  
+  if (!accessKeyId || !secretAccessKey) {
+    console.warn('AWS credentials are missing - DynamoDB operations will fail in development!');
+  }
+  
+  // In development, use explicit credentials
+  dynamodbClient = new DynamoDBClient({ 
+    region,
+    credentials: {
+      accessKeyId: accessKeyId || '',
+      secretAccessKey: secretAccessKey || ''
+    }
+  });
+  
+  cognitoClient = new CognitoIdentityProviderClient({ 
+    region,
+    credentials: {
+      accessKeyId: accessKeyId || '',
+      secretAccessKey: secretAccessKey || ''
+    }
+  });
 }
 
-// DynamoDB client setup with explicit credentials
-const dynamodbClient = new DynamoDBClient({ 
-  region,
-  credentials: {
-    accessKeyId: accessKeyId || '',
-    secretAccessKey: secretAccessKey || ''
-  }
-});
 const docClient = DynamoDBDocumentClient.from(dynamodbClient);
 
 // Log environment variables
@@ -50,20 +93,64 @@ console.log('VITE_COGNITO_USER_POOL_ID:', import.meta.env.VITE_COGNITO_USER_POOL
 console.log('VITE_COGNITO_CLIENT_ID:', import.meta.env.VITE_COGNITO_CLIENT_ID);
 
 // Cognito client setup
-// Updated to use explicit credentials for consistency
-const userPoolId = 'us-east-1_Un9I1Ba6U';
-const clientId = '4qfs9mvg1phde56htj0d3b3ku9';
-const cognitoClient = new CognitoIdentityProviderClient({ 
-  region,
-  credentials: {
-    accessKeyId: accessKeyId || '',
-    secretAccessKey: secretAccessKey || ''
-  }
-});
+// Use environment variables or fallback to the provided values
+const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID || 'us-east-1_0phCrx0Ao';
+const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID || '4qfs9mvg1phde56htj0d3b3ku9';
 
 console.log('Using Cognito configuration:');
 console.log('User Pool ID:', userPoolId);
 console.log('Client ID:', clientId);
+
+// Admin function to create a test user - for development only
+export const createTestUser = async (email: string, password: string, name = 'Test User') => {
+  try {
+    // Check if user exists first
+    try {
+      const adminGetUserCommand = new AdminGetUserCommand({
+        UserPoolId: userPoolId,
+        Username: email
+      });
+      await cognitoClient.send(adminGetUserCommand);
+      console.log('User already exists:', email);
+      return { success: true, message: 'User already exists', userExists: true };
+    } catch (error: any) {
+      // If user doesn't exist, proceed with creation
+      if (error.name === 'UserNotFoundException') {
+        const adminCreateUserCommand = new AdminCreateUserCommand({
+          UserPoolId: userPoolId,
+          Username: email,
+          TemporaryPassword: password,
+          MessageAction: 'SUPPRESS', // Don't send welcome email
+          UserAttributes: [
+            { Name: 'email', Value: email },
+            { Name: 'email_verified', Value: 'true' },
+            { Name: 'name', Value: name }
+          ]
+        });
+        
+        await cognitoClient.send(adminCreateUserCommand);
+        
+        // Set permanent password
+        const adminSetUserPasswordCommand = new AdminSetUserPasswordCommand({
+          UserPoolId: userPoolId,
+          Username: email,
+          Password: password,
+          Permanent: true
+        });
+        
+        await cognitoClient.send(adminSetUserPasswordCommand);
+        
+        console.log('Test user created successfully:', email);
+        return { success: true, message: 'Test user created successfully' };
+      } else {
+        throw error;
+      }
+    }
+  } catch (error) {
+    console.error('Error creating test user:', error);
+    return { success: false, message: 'Failed to create test user', error };
+  }
+};
 
 // User types - keeping the same interface as Supabase for compatibility
 export type UserCredentials = {
@@ -78,12 +165,14 @@ export type UserRegistration = UserCredentials & {
 // Table names
 const CLUSTERS_TABLE = 'clusters';
 const CHECKPOINTS_TABLE = 'checkpoints';
+const MIGRATION_LOGS_TABLE = 'migration_logs';
 
 // Auth service - mimicking Supabase auth functionality
 export const authService = {
   // Sign up a new user
   async signUp({ email, password, name }: UserRegistration) {
     try {
+      // First attempt to sign up the user
       const command = new SignUpCommand({
         ClientId: clientId,
         Username: email,
@@ -95,11 +184,61 @@ export const authService = {
       });
 
       const response = await cognitoClient.send(command);
+      const userId = response.UserSub || '';
       
-      return { 
-        user: { id: response.UserSub, email }, 
-        session: { access_token: '', refresh_token: '' } 
-      };
+      try {
+        // After sign-up, use admin powers to confirm the user so they can sign in immediately
+        // This is a simplified flow for better UX - in production, you'd likely have email verification
+        const adminConfirmSignUpCommand = new AdminConfirmSignUpCommand({
+          UserPoolId: userPoolId,
+          Username: email
+        });
+        
+        await cognitoClient.send(adminConfirmSignUpCommand);
+        console.log('User confirmed successfully:', email);
+        
+        // Now sign in automatically to get tokens
+        try {
+          const signInCommand = new InitiateAuthCommand({
+            ClientId: clientId,
+            AuthFlow: 'USER_PASSWORD_AUTH',
+            AuthParameters: {
+              USERNAME: email,
+              PASSWORD: password
+            }
+          });
+          
+          const signInResponse = await cognitoClient.send(signInCommand);
+          const accessToken = signInResponse.AuthenticationResult?.AccessToken || '';
+          const refreshToken = signInResponse.AuthenticationResult?.RefreshToken || '';
+          
+          // Store tokens in localStorage for session persistence
+          localStorage.setItem('accessToken', accessToken);
+          localStorage.setItem('refreshToken', refreshToken);
+          
+          return { 
+            user: { id: userId, email }, 
+            session: { 
+              access_token: accessToken,
+              refresh_token: refreshToken
+            } 
+          };
+        } catch (signInError) {
+          console.error('Error signing in after sign up:', signInError);
+          // Return user but no session if sign-in fails
+          return { 
+            user: { id: userId, email }, 
+            session: { access_token: '', refresh_token: '' } 
+          };
+        }
+      } catch (confirmError) {
+        console.error('Error confirming user:', confirmError);
+        // Return basic info even if confirmation fails
+        return { 
+          user: { id: userId, email }, 
+          session: { access_token: '', refresh_token: '' } 
+        };
+      }
     } catch (error) {
       console.error('Error signing up:', error);
       toast.error('Failed to create account');
@@ -110,6 +249,8 @@ export const authService = {
   // Sign in a user
   async signIn({ email, password }: UserCredentials) {
     try {
+      console.log(`Attempting to sign in user: ${email}`);
+      
       const command = new InitiateAuthCommand({
         ClientId: clientId,
         AuthFlow: 'USER_PASSWORD_AUTH',
@@ -120,15 +261,29 @@ export const authService = {
       });
 
       const response = await cognitoClient.send(command);
+      console.log('Sign in successful, received tokens');
+      
       const accessToken = response.AuthenticationResult?.AccessToken || '';
       const refreshToken = response.AuthenticationResult?.RefreshToken || '';
+      
+      if (!accessToken) {
+        console.error('Authentication succeeded but no access token was returned');
+        throw new Error('No access token received');
+      }
       
       // Store tokens in localStorage for session persistence
       localStorage.setItem('accessToken', accessToken);
       localStorage.setItem('refreshToken', refreshToken);
       
       // Get user details
+      console.log('Getting user details with access token');
       const user = await this.getUser();
+      
+      if (!user) {
+        console.error('Failed to retrieve user details after successful authentication');
+      } else {
+        console.log(`User details retrieved: ${user.id}`);
+      }
       
       return { 
         user, 
@@ -137,10 +292,46 @@ export const authService = {
           refresh_token: refreshToken 
         } 
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error signing in:', error);
-      toast.error('Failed to sign in');
-      throw error;
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      
+      // Check if the error is because the user doesn't exist
+      if (error.name === 'UserNotFoundException') {
+        toast.error('This account does not exist. Please sign up first.');
+        throw new Error('User does not exist. Please create an account first.');
+      } else if (error.name === 'NotAuthorizedException') {
+        if (error.message.includes('Incorrect username or password')) {
+          toast.error('Incorrect username or password');
+          throw new Error('Incorrect username or password');
+        } else if (error.message.includes('User is not confirmed')) {
+          console.log('User is not confirmed, attempting to confirm automatically...');
+          try {
+            // Auto-confirm the user for better experience
+            const adminConfirmSignUpCommand = new AdminConfirmSignUpCommand({
+              UserPoolId: userPoolId,
+              Username: email
+            });
+            
+            await cognitoClient.send(adminConfirmSignUpCommand);
+            console.log('User confirmed successfully, attempting sign-in again');
+            
+            // Try sign in again
+            return this.signIn({ email, password });
+          } catch (confirmError) {
+            console.error('Failed to auto-confirm user:', confirmError);
+            toast.error('Account is not verified. Please try again.');
+            throw new Error('Account is not verified. Please contact support for assistance.');
+          }
+        } else {
+          toast.error('Authentication failed');
+          throw error;
+        }
+      } else {
+        toast.error('Failed to sign in');
+        throw error;
+      }
     }
   },
 
@@ -195,28 +386,86 @@ export const authService = {
         return null;
       }
       
-      const command = new GetUserCommand({
-        AccessToken: accessToken
-      });
-      
-      const response = await cognitoClient.send(command);
-      
-      // Extract user ID and email from attributes
-      const attributes = response.UserAttributes || [];
-      const emailAttr = attributes.find(attr => attr.Name === 'email');
-      const subAttr = attributes.find(attr => attr.Name === 'sub');
-      
-      if (!subAttr || !emailAttr) {
-        return null;
+      try {
+        const command = new GetUserCommand({
+          AccessToken: accessToken
+        });
+        
+        const response = await cognitoClient.send(command);
+        
+        // Extract user ID and email from attributes
+        const attributes = response.UserAttributes || [];
+        const emailAttr = attributes.find(attr => attr.Name === 'email');
+        const subAttr = attributes.find(attr => attr.Name === 'sub');
+        
+        if (!subAttr || !emailAttr) {
+          return null;
+        }
+        
+        return {
+          id: subAttr.Value || '',
+          email: emailAttr.Value || ''
+        };
+      } catch (error: any) {
+        // If the token is expired, try to refresh it
+        if (error.name === 'NotAuthorizedException') {
+          console.log('Access token expired, attempting to refresh...');
+          const refreshed = await this.refreshToken();
+          if (refreshed) {
+            // Try again with the new token
+            return this.getUser();
+          } else {
+            // If refresh fails, return null
+            console.log('Token refresh failed, user needs to login again');
+            return null;
+          }
+        }
+        throw error;
       }
-      
-      return {
-        id: subAttr.Value || '',
-        email: emailAttr.Value || ''
-      };
     } catch (error) {
       console.error('Error getting user:', error);
       return null;
+    }
+  },
+
+  // Refresh the token when it expires
+  async refreshToken() {
+    try {
+      const refreshToken = localStorage.getItem('refreshToken');
+      
+      if (!refreshToken) {
+        console.log('No refresh token available');
+        return false;
+      }
+      
+      // Initialize a new Cognito IDP client for refresh token operation
+      const refreshCommand = new InitiateAuthCommand({
+        AuthFlow: 'REFRESH_TOKEN_AUTH',
+        ClientId: clientId,
+        AuthParameters: {
+          'REFRESH_TOKEN': refreshToken
+        }
+      });
+      
+      const response = await cognitoClient.send(refreshCommand);
+      
+      // Update tokens in local storage
+      if (response.AuthenticationResult?.AccessToken) {
+        localStorage.setItem('accessToken', response.AuthenticationResult.AccessToken);
+        console.log('Access token refreshed successfully');
+        
+        // If a new refresh token is provided, update it too
+        if (response.AuthenticationResult?.RefreshToken) {
+          localStorage.setItem('refreshToken', response.AuthenticationResult.RefreshToken);
+        }
+        
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      return false;
     }
   },
 
@@ -724,4 +973,521 @@ function getMockCheckpoints(userId: string): Checkpoint[] {
       lastUpdated: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
     }
   ];
-} 
+}
+
+// Migration Log Types
+export interface MigrationLog {
+  id: string;
+  created_at: string;
+  owner_id: string;
+  sourceCluster: {
+    id: string;
+    name: string;
+  };
+  targetCluster: {
+    id: string;
+    name: string;
+  };
+  status: 'completed' | 'failed' | 'in-progress';
+  resourcesTotal: number;
+  resourcesMigrated: number;
+  resourcesFailed: number;
+  completedResources?: any[];
+  failedResources?: Array<{ kind: string; name: string; namespace: string; error: string }>;
+  duration?: number; // in seconds
+  error?: string;
+}
+
+export interface CreateMigrationLogPayload {
+  sourceClusterId: string;
+  sourceClusterName: string;
+  targetClusterId: string;
+  targetClusterName: string;
+  status?: 'in-progress' | 'completed' | 'failed';
+  resourcesTotal: number;
+  error?: string;
+}
+
+// Create a helper function to ensure table exists and is active
+async function ensureTableExists(tableName: string): Promise<boolean> {
+  try {
+    // Check if the table exists
+    const describeParams = {
+      TableName: tableName
+    };
+    
+    try {
+      console.log(`Checking if table ${tableName} exists...`);
+      const tableInfo = await dynamodbClient.send(new DescribeTableCommand(describeParams));
+      
+      // If table exists but is not active, wait for it
+      if (tableInfo.Table?.TableStatus !== 'ACTIVE') {
+        console.log(`Table ${tableName} exists but is not active (${tableInfo.Table?.TableStatus}). Waiting...`);
+        let attempts = 0;
+        const maxAttempts = 10;
+        
+        while (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+          
+          // Check status again
+          const tableStatus = await dynamodbClient.send(new DescribeTableCommand(describeParams));
+          if (tableStatus.Table?.TableStatus === 'ACTIVE') {
+            console.log(`Table ${tableName} is now ACTIVE`);
+            return true;
+          }
+          
+          attempts++;
+          console.log(`Still waiting for table ${tableName} to be ACTIVE... (attempt ${attempts}/${maxAttempts})`);
+        }
+        
+        console.error(`Table ${tableName} did not become ACTIVE after ${maxAttempts} attempts`);
+        return false;
+      }
+      
+      console.log(`Table ${tableName} exists and is ACTIVE`);
+      return true;
+    } catch (error: any) {
+      if (error.name === 'ResourceNotFoundException') {
+        console.log(`Table ${tableName} does not exist. Creating...`);
+        
+        // Create table based on the table name
+        if (tableName === 'migration_logs') {
+          const params = {
+            TableName: tableName,
+            KeySchema: [
+              { AttributeName: 'id', KeyType: KeyType.HASH }
+            ],
+            AttributeDefinitions: [
+              { AttributeName: 'id', AttributeType: ScalarAttributeType.S }
+            ],
+            ProvisionedThroughput: {
+              ReadCapacityUnits: 5,
+              WriteCapacityUnits: 5
+            }
+          };
+          
+          await dynamodbClient.send(new CreateTableCommand(params));
+          console.log(`Table ${tableName} created. Waiting for it to become ACTIVE...`);
+          
+          // Wait for table to be created and active
+          let attempts = 0;
+          const maxAttempts = 10;
+          
+          while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+            
+            try {
+              const tableStatus = await dynamodbClient.send(new DescribeTableCommand(describeParams));
+              if (tableStatus.Table?.TableStatus === 'ACTIVE') {
+                console.log(`Table ${tableName} is now ACTIVE`);
+                return true;
+              }
+            } catch (error) {
+              console.log(`Table not yet available for checking status`);
+            }
+            
+            attempts++;
+            console.log(`Waiting for table ${tableName} to be ACTIVE... (attempt ${attempts}/${maxAttempts})`);
+          }
+          
+          console.error(`Table ${tableName} did not become ACTIVE after ${maxAttempts} attempts`);
+          return false;
+        } else {
+          console.error(`Unknown table name ${tableName}, don't know how to create it`);
+          return false;
+        }
+      } else {
+        console.error(`Error checking table ${tableName}:`, error);
+        return false;
+      }
+    }
+  } catch (error) {
+    console.error(`Error ensuring table ${tableName} exists:`, error);
+    return false;
+  }
+}
+
+// Migration Log service
+export const migrationLogService = {
+  // Create a new migration log
+  async createMigrationLog(payload: CreateMigrationLogPayload, userId: string): Promise<MigrationLog | null> {
+    try {
+      // Check if the migration_logs table exists, if not, create it
+      try {
+        const { DescribeTableCommand } = await import('@aws-sdk/client-dynamodb');
+        
+        // Try to describe the table to see if it exists
+        await dynamodbClient.send(new DescribeTableCommand({
+          TableName: MIGRATION_LOGS_TABLE
+        }));
+        
+        // If we get here, the table exists
+        console.log(`Table ${MIGRATION_LOGS_TABLE} exists.`);
+      } catch (tableError: any) {
+        // If the error is ResourceNotFoundException, create the table
+        if (tableError.name === 'ResourceNotFoundException') {
+          console.log(`Table ${MIGRATION_LOGS_TABLE} does not exist. Creating it...`);
+          
+          // Create the table with minimal configuration
+          const { CreateTableCommand } = await import('@aws-sdk/client-dynamodb');
+          
+          try {
+            await dynamodbClient.send(new CreateTableCommand({
+              TableName: MIGRATION_LOGS_TABLE,
+              KeySchema: [
+                { AttributeName: 'id', KeyType: KeyType.HASH },
+                { AttributeName: 'owner_id', KeyType: KeyType.RANGE }
+              ],
+              AttributeDefinitions: [
+                { AttributeName: 'id', AttributeType: ScalarAttributeType.S },
+                { AttributeName: 'owner_id', AttributeType: ScalarAttributeType.S }
+              ],
+              ProvisionedThroughput: {
+                ReadCapacityUnits: 5,
+                WriteCapacityUnits: 5
+              }
+            }));
+            console.log(`Table ${MIGRATION_LOGS_TABLE} created successfully.`);
+            
+            // Wait for the table to be in ACTIVE state before proceeding
+            const waitForTableActive = async (): Promise<boolean> => {
+              try {
+                const { DescribeTableCommand } = await import('@aws-sdk/client-dynamodb');
+                const response = await dynamodbClient.send(new DescribeTableCommand({
+                  TableName: MIGRATION_LOGS_TABLE
+                }));
+                
+                if (response.Table?.TableStatus === 'ACTIVE') {
+                  console.log(`Table ${MIGRATION_LOGS_TABLE} is now active.`);
+                  return true;
+                } else {
+                  console.log(`Waiting for table ${MIGRATION_LOGS_TABLE} to become active...`);
+                  return false;
+                }
+              } catch (error) {
+                console.error(`Error checking table status: ${error}`);
+                return false;
+              }
+            };
+            
+            // Poll every 2 seconds for up to 30 seconds
+            let attempts = 0;
+            const maxAttempts = 15;
+            let tableActive = false;
+            
+            while (!tableActive && attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              tableActive = await waitForTableActive();
+              attempts++;
+            }
+            
+            if (!tableActive) {
+              throw new Error(`Table ${MIGRATION_LOGS_TABLE} did not become active in time`);
+            }
+          } catch (createError) {
+            console.error(`Error creating table ${MIGRATION_LOGS_TABLE}:`, createError);
+            // Continue with the function - it might work with mock data
+          }
+        } else {
+          console.error(`Error checking table ${MIGRATION_LOGS_TABLE}:`, tableError);
+        }
+      }
+      
+      // Create the migration log object
+      const timestamp = new Date().toISOString();
+      const id = `migration-${generateId()}`;
+      
+      const migrationLog: MigrationLog = {
+        id,
+        created_at: timestamp,
+        owner_id: userId,
+        sourceCluster: {
+          id: payload.sourceClusterId,
+          name: payload.sourceClusterName
+        },
+        targetCluster: {
+          id: payload.targetClusterId,
+          name: payload.targetClusterName
+        },
+        status: payload.status || 'in-progress',
+        resourcesTotal: payload.resourcesTotal,
+        resourcesMigrated: 0,
+        resourcesFailed: 0,
+        error: payload.error
+      };
+      
+      try {
+        // Try to save to DynamoDB
+        const command = new PutCommand({
+          TableName: MIGRATION_LOGS_TABLE,
+          Item: migrationLog
+        });
+        
+        await docClient.send(command);
+        console.log('Migration log saved to DynamoDB successfully:', migrationLog.id);
+        return migrationLog;
+      } catch (putError) {
+        console.error('Error putting migration log to DynamoDB:', putError);
+        
+        // Fallback: Save to localStorage for development/demo purposes
+        try {
+          const storageKey = 'migration_logs';
+          const existingLogs = JSON.parse(localStorage.getItem(storageKey) || '[]');
+          existingLogs.push(migrationLog);
+          localStorage.setItem(storageKey, JSON.stringify(existingLogs));
+          console.log('Migration log saved to localStorage as fallback');
+        } catch (localStorageError) {
+          console.error('Error saving to localStorage:', localStorageError);
+        }
+        
+        // Return the log object even if saving failed
+        return migrationLog;
+      }
+    } catch (error) {
+      console.error('Error creating migration log:', error);
+      
+      // Generate a mock migration log for development
+      const timestamp = new Date().toISOString();
+      const mockId = `migration-${generateId()}`;
+      
+      return {
+        id: mockId,
+        created_at: timestamp,
+        owner_id: userId,
+        sourceCluster: {
+          id: payload.sourceClusterId,
+          name: payload.sourceClusterName
+        },
+        targetCluster: {
+          id: payload.targetClusterId,
+          name: payload.targetClusterName
+        },
+        status: payload.status || 'in-progress',
+        resourcesTotal: payload.resourcesTotal,
+        resourcesMigrated: 0,
+        resourcesFailed: 0,
+        error: payload.error
+      };
+    }
+  },
+  
+  // Get all migration logs for a user
+  async getMigrationLogs(userId: string): Promise<MigrationLog[]> {
+    try {
+      // Use ScanCommand instead of QueryCommand since we're filtering on owner_id which is not the full primary key
+      const command = new ScanCommand({
+        TableName: MIGRATION_LOGS_TABLE,
+        FilterExpression: 'owner_id = :userId',
+        ExpressionAttributeValues: {
+          ':userId': userId
+        }
+      });
+      
+      const response = await docClient.send(command);
+      return (response.Items || []) as MigrationLog[];
+    } catch (error) {
+      console.error('Error getting migration logs:', error);
+      // For development/testing, return mock data if DB operation fails
+      return [];
+    }
+  },
+  
+  // Get a specific migration log by ID
+  async getMigrationLogById(migrationId: string): Promise<MigrationLog | null> {
+    try {
+      const command = new GetCommand({
+        TableName: MIGRATION_LOGS_TABLE,
+        Key: {
+          id: migrationId
+        }
+      });
+      
+      const response = await docClient.send(command);
+      return response.Item as MigrationLog || null;
+    } catch (error) {
+      console.error('Error getting migration log:', error);
+      return null;
+    }
+  },
+  
+  // Update a migration log (for updating status, progress, etc.)
+  async updateMigrationLog(
+    migrationId: string, 
+    updates: Partial<{
+      status: 'completed' | 'failed' | 'in-progress';
+      resourcesMigrated: number;
+      resourcesFailed: number;
+      completedResources: any[];
+      failedResources: Array<{ kind: string; name: string; namespace: string; error: string }>;
+      duration: number;
+      error: string;
+    }>
+  ): Promise<boolean> {
+    try {
+      // First ensure the table exists
+      const tableExists = await ensureTableExists('migration_logs');
+      if (!tableExists) {
+        console.error('Could not ensure migration_logs table exists, storing in local storage instead');
+        
+        // Fall back to localStorage
+        const existingData = localStorage.getItem(`migration_log_${migrationId}`);
+        const logData = existingData ? JSON.parse(existingData) : {};
+        
+        localStorage.setItem(`migration_log_${migrationId}`, JSON.stringify({
+          ...logData,
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }));
+        
+        return true;
+      }
+      
+      // Build expression attribute names and values dynamically based on provided updates
+      const expressionAttributeNames: Record<string, string> = {};
+      const expressionAttributeValues: Record<string, any> = {};
+      
+      let updateExpression = 'SET ';
+      const updateExpressionParts: string[] = [];
+      
+      // Process each property in the updates object
+      Object.entries(updates).forEach(([key, value], index) => {
+        // Skip undefined values
+        if (value === undefined) return;
+        
+        const attributeNameKey = `#attr${index}`;
+        const attributeValueKey = `:val${index}`;
+        
+        expressionAttributeNames[attributeNameKey] = key;
+        expressionAttributeValues[attributeValueKey] = value;
+        
+        updateExpressionParts.push(`${attributeNameKey} = ${attributeValueKey}`);
+      });
+      
+      // Add updatedAt timestamp
+      const timestampNameKey = '#updatedAt';
+      const timestampValueKey = ':updatedAt';
+      expressionAttributeNames[timestampNameKey] = 'updatedAt';
+      expressionAttributeValues[timestampValueKey] = new Date().toISOString();
+      updateExpressionParts.push(`${timestampNameKey} = ${timestampValueKey}`);
+      
+      // Combine all parts into the update expression
+      updateExpression += updateExpressionParts.join(', ');
+      
+      // Only update if there are attributes to update
+      if (Object.keys(expressionAttributeValues).length === 0) {
+        console.log('No attributes to update in migration log');
+        return true;
+      }
+      
+      // First, do a scan to find the migration log entry that matches our ID
+      // This is not the most efficient way, but it will let us get both id and owner_id
+      try {
+        const scanCommand = new ScanCommand({
+          TableName: 'migration_logs',
+          FilterExpression: 'id = :migrationId',
+          ExpressionAttributeValues: {
+            ':migrationId': migrationId
+          },
+          Limit: 1 // We only need one record
+        });
+        
+        console.log(`Scanning for migration log with id ${migrationId}`);
+        const scanResult = await docClient.send(scanCommand);
+        
+        if (!scanResult.Items || scanResult.Items.length === 0) {
+          console.log(`No migration log found with id ${migrationId}, skipping update`);
+          
+          // Fall back to localStorage when record doesn't exist
+          const existingData = localStorage.getItem(`migration_log_${migrationId}`);
+          const logData = existingData ? JSON.parse(existingData) : {};
+          
+          localStorage.setItem(`migration_log_${migrationId}`, JSON.stringify({
+            ...logData,
+            ...updates,
+            updatedAt: new Date().toISOString()
+          }));
+          
+          return true;
+        }
+        
+        // Get the item with all its attributes
+        const item = scanResult.Items[0];
+        console.log(`Found migration log: ${JSON.stringify(item)}`);
+        
+        // Now we can use the correct key structure with both id and owner_id
+        if (item.id && item.owner_id) {
+          const updateCommand = new UpdateCommand({
+            TableName: 'migration_logs',
+            Key: { 
+              id: item.id,
+              owner_id: item.owner_id 
+            },
+            UpdateExpression: updateExpression,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ReturnValues: 'UPDATED_NEW'
+          });
+          
+          await docClient.send(updateCommand);
+          console.log(`Migration log updated for ${migrationId}`);
+          return true;
+        } else {
+          throw new Error(`Found item but missing required key attributes: ${JSON.stringify(item)}`);
+        }
+      } catch (scanError) {
+        console.error(`Error scanning for migration log: ${scanError}`);
+        
+        // Fall back to localStorage when scan fails
+        const existingData = localStorage.getItem(`migration_log_${migrationId}`);
+        const logData = existingData ? JSON.parse(existingData) : {};
+        
+        localStorage.setItem(`migration_log_${migrationId}`, JSON.stringify({
+          ...logData,
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }));
+        
+        console.log(`Saved migration log to localStorage for ${migrationId} after scan failure`);
+        return true;
+      }
+    } catch (error) {
+      console.error('Error updating migration log:', error);
+      
+      // Fall back to localStorage when DynamoDB fails
+      try {
+        const existingData = localStorage.getItem(`migration_log_${migrationId}`);
+        const logData = existingData ? JSON.parse(existingData) : {};
+        
+        localStorage.setItem(`migration_log_${migrationId}`, JSON.stringify({
+          ...logData,
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }));
+        
+        console.log(`Saved migration log to localStorage for ${migrationId}`);
+        return true;
+      } catch (storageError) {
+        console.error('Failed to save to localStorage:', storageError);
+        return false;
+      }
+    }
+  },
+  
+  // Delete a migration log
+  async deleteMigrationLog(migrationId: string): Promise<boolean> {
+    try {
+      const command = new DeleteCommand({
+        TableName: MIGRATION_LOGS_TABLE,
+        Key: {
+          id: migrationId
+        }
+      });
+      
+      await docClient.send(command);
+      return true;
+    } catch (error) {
+      console.error('Error deleting migration log:', error);
+      return false;
+    }
+  }
+}; 

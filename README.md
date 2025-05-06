@@ -25,6 +25,7 @@ A powerful web application for managing, monitoring, and migrating Kubernetes cl
 - npm 8.x or later
 - Access to a Kubernetes cluster (or use mock data for development)
 - AWS CLI configured (for AWS EKS integration)
+- For production: EC2 instance with appropriate IAM role attached
 
 ## Setup and Installation
 
@@ -53,106 +54,313 @@ A powerful web application for managing, monitoring, and migrating Kubernetes cl
 
 4. Key environment variables to configure:
    ```
+   # Deployment environment
+   DEPLOYMENT=local
+   
+   # Application ports
+   FRONTEND_PORT=3009
+   BACKEND_PORT=8089
+   
    # Frontend configuration
-   VITE_API_BASE_URL=http://localhost:3001
+   VITE_K8S_PROXY_URL=http://localhost:8089
+   VITE_API_PROXY_URL=http://localhost:8089
    VITE_USE_MOCK_K8S_DATA=false  # Set to true for development without a real cluster
    
-   # Server configuration
-   PORT=3001
-   NODE_ENV=development
-   KUBECONFIG_PATH=/path/to/your/kubeconfig  # Optional, can also upload via UI
+   # AWS credentials (for local development)
+   VITE_AWS_ACCESS_KEY_ID=your_access_key_id
+   VITE_AWS_SECRET_ACCESS_KEY=your_secret_access_key
+   VITE_AWS_REGION=us-east-1
+   
+   # Cognito configuration
+   VITE_COGNITO_USER_POOL_ID=your_user_pool_id
+   VITE_COGNITO_CLIENT_ID=your_client_id
+   VITE_DYNAMODB_REGION=us-east-1
    ```
 
 ## Running the Application
 
 ### Development Mode
 
-1. Start the server in one terminal:
+1. Start the application in development mode:
    ```bash
-   # Start the server component
-   npm run server
-   ```
-
-2. Start the frontend in another terminal:
-   ```bash
-   # Start the frontend development server
    npm run dev
    ```
 
-3. Or use the combined development command:
+2. Access the application:
+   - Frontend: http://localhost:3009
+   - Backend API: http://localhost:8089
+
+## Production Deployment
+
+### Automated Deployment
+
+For a streamlined deployment, you can use our automated installation script:
+
+```bash
+# Make the script executable
+chmod +x install.sh
+
+# Run the installation script (requires sudo privileges)
+sudo ./install.sh
+```
+
+This script will:
+- Install all required dependencies
+- Set up the application in /opt/kube-migrate
+- Configure environment variables for production
+- Create a systemd service for automatic startup
+- Configure nginx with the /kube-migrate path prefix
+- Start the application
+
+### Manual Step-by-Step Deployment Guide
+
+#### 1. Prepare the EC2 Instance
+
+1. Launch an EC2 instance with the following:
+   - Amazon Linux 2 or Ubuntu Server
+   - At least 2GB RAM and 2 vCPUs
+   - An IAM role attached with these permissions:
+     - AmazonCognitoReadOnly
+     - AmazonDynamoDBFullAccess (or more restricted access as needed)
+     - AmazonEKSClusterPolicy (if connecting to EKS clusters)
+
+2. Install required dependencies:
    ```bash
-   npm run dev:full
+   # For Amazon Linux
+   sudo yum update -y
+   sudo yum install -y git nodejs npm nginx
+
+   # For Ubuntu
+   sudo apt update
+   sudo apt install -y git nodejs npm nginx
    ```
 
-4. Access the application:
-   - Frontend: http://localhost:8080
-   - Server API: http://localhost:3001
+#### 2. Deploy the Application
 
-### Production Mode
-
-1. Build the application:
+1. Clone the repository on the EC2 instance:
    ```bash
-   npm run build:prod
+   git clone https://github.com/yourusername/cluster-migrate-magic.git
+   cd cluster-migrate-magic
    ```
 
-2. Start the production server (serves both frontend and API):
+2. Install dependencies:
    ```bash
-   # For Linux/Mac
-   npm run start
-   
-   # For Windows
-   npm run start:win
+   npm install
    ```
 
-3. Access the production application at http://localhost:3001
-
-### Using Docker
-
-1. Build and run using Docker Compose:
+3. Create the production environment file:
    ```bash
-   docker-compose up -d
-   ```
-
-2. Access the application at http://localhost:3001
-
-3. To stop the application:
-   ```bash
-   docker-compose down
-   ```
-
-### Production Deployment
-
-1. Configure production environment variables:
-   ```bash
-   # Copy the production environment template
-   cp .env.example .env.production
-   
-   # Edit the production environment settings
    nano .env.production
    ```
 
-2. Build the application for production:
-   ```bash
-   npm run build:prod
+4. Add the following configuration to `.env.production`:
+   ```
+   # Deployment environment
+   DEPLOYMENT=production
+   
+   # Application ports
+   FRONTEND_PORT=3009
+   BACKEND_PORT=8089
+   
+   # Kubernetes API proxy settings with path prefix
+   VITE_K8S_PROXY_URL=/kube-migrate
+   VITE_API_PROXY_URL=/kube-migrate
+   VITE_USE_MOCK_K8S_DATA=false
+   
+   # AWS configuration
+   VITE_AWS_REGION=us-east-1
+   
+   # AWS Cognito configuration
+   VITE_COGNITO_USER_POOL_ID=your_user_pool_id
+   VITE_COGNITO_CLIENT_ID=your_client_id
+   VITE_DYNAMODB_REGION=us-east-1
+   
+   # Server configuration
+   PORT=8089
+   NODE_ENV=production
    ```
 
-3. Start the production server:
+5. Build the application:
    ```bash
-   # For Linux/Mac
-   npm run start
-   
-   # For Windows
-   npm run start:win
+   npm run build
    ```
 
-4. For proper production deployment, it's recommended to use Docker:
+#### 3. Configure Application Service
+
+1. Create a startup script:
    ```bash
-   # Build the Docker image
-   docker build -t kube-migrate-magic:latest .
-   
-   # Run the Docker container
-   docker run -p 3001:3001 -d kube-migrate-magic:latest
+   nano start-app.sh
    ```
+
+2. Add the following content to the script:
+   ```bash
+   #!/bin/bash
+   # Production startup script for Kube-Migrate application
+
+   # Set environment variables
+   export NODE_ENV=production
+   export DEPLOYMENT=production
+   export PORT=8089
+   export BACKEND_PORT=8089
+   export FRONTEND_PORT=3009
+
+   # Change to application directory
+   cd "$(dirname "$0")"
+
+   # Start the application
+   node server/proxy.js
+   ```
+
+3. Make the script executable:
+   ```bash
+   chmod +x start-app.sh
+   ```
+
+4. Create a systemd service file:
+   ```bash
+   sudo nano /etc/systemd/system/kube-migrate.service
+   ```
+
+5. Add the following content to the service file:
+   ```
+   [Unit]
+   Description=Kube Migrate Application
+   After=network.target
+
+   [Service]
+   User=ec2-user
+   WorkingDirectory=/path/to/cluster-migrate-magic
+   ExecStart=/path/to/cluster-migrate-magic/start-app.sh
+   Restart=always
+   RestartSec=10
+   StandardOutput=journal
+   StandardError=journal
+   SyslogIdentifier=kube-migrate
+   Environment=NODE_ENV=production
+   Environment=DEPLOYMENT=production
+   Environment=PORT=8089
+   Environment=BACKEND_PORT=8089
+   Environment=FRONTEND_PORT=3009
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+6. Enable and start the service:
+   ```bash
+   sudo systemctl enable kube-migrate
+   sudo systemctl start kube-migrate
+   ```
+
+#### 4. Configure NGINX as Reverse Proxy
+
+1. Create an NGINX configuration file:
+   ```bash
+   sudo nano /etc/nginx/conf.d/kube-migrate.conf
+   ```
+
+2. Add the following configuration:
+   ```nginx
+   server {
+       listen 443 ssl;
+       listen [::]:443 ssl;
+       server_name your-domain.com;
+
+       ssl_certificate /etc/nginx/ssl/your-certificate.pem;
+       ssl_certificate_key /etc/nginx/ssl/your-key.key;
+       ssl_protocols TLSv1.2;
+
+       # Other existing location blocks...
+
+       location /kube-migrate/ {
+           proxy_pass http://127.0.0.1:8089/;
+           proxy_redirect off;
+           proxy_read_timeout 3600s;
+           proxy_send_timeout 3600s;
+           proxy_http_version 1.1;
+           proxy_set_header Host $http_host;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           client_max_body_size 0;
+       }
+   }
+   ```
+
+3. Test the NGINX configuration:
+   ```bash
+   sudo nginx -t
+   ```
+
+4. Reload NGINX to apply changes:
+   ```bash
+   sudo systemctl reload nginx
+   ```
+
+### Docker Deployment
+
+For container-based deployment:
+
+```bash
+# Using Docker directly
+docker build -t kube-migrate:latest .
+docker run -p 8089:8089 -d --name kube-migrate kube-migrate:latest
+
+# OR using Docker Compose
+docker-compose up -d
+```
+
+The Docker deployment automatically sets all necessary environment variables for production mode and IAM role usage.
+
+#### 5. AWS Credentials Configuration
+
+The application automatically detects the deployment environment and uses the appropriate AWS credential source:
+
+- **In local development**: Uses AWS Access Key and Secret Key from environment variables
+- **In production**: Uses the IAM Role attached to the EC2 instance
+
+No additional configuration is needed if you've set `DEPLOYMENT=production` in your environment file and attached the correct IAM role to your EC2 instance.
+
+#### 6. Verify Deployment
+
+1. Access the application at:
+   ```
+   https://your-domain.com/kube-migrate
+   ```
+
+2. Check if the application is correctly using the EC2 instance IAM role:
+   ```bash
+   sudo journalctl -u kube-migrate | grep "IAM Role"
+   ```
+   
+   You should see a message like:
+   ```
+   Using IAM Role from EC2 instance for AWS authentication
+   ```
+
+3. Check application logs for any errors:
+   ```bash
+   sudo journalctl -u kube-migrate -f
+   ```
+
+### Troubleshooting Production Deployment
+
+1. If the application fails to connect to AWS services:
+   - Verify IAM role is correctly attached to the EC2 instance
+   - Check the IAM role has the necessary permissions
+   - Ensure `DEPLOYMENT=production` is set in the environment
+
+2. If nginx proxy isn't working:
+   - Check nginx error logs: `sudo tail -f /var/log/nginx/error.log`
+   - Verify the nginx configuration passes validation: `sudo nginx -t`
+   - Make sure the application is running on port 8089: `netstat -tulpn | grep 8089`
+
+3. If paths don't work correctly:
+   - Check that `VITE_K8S_PROXY_URL=/kube-migrate` is set in production environment
+   - Verify the trailing slash in nginx proxy_pass configuration
+   - Restart the application service: `sudo systemctl restart kube-migrate`
 
 ## API Endpoints
 
@@ -171,14 +379,6 @@ Main API categories:
 - `/kube-migrate/k8s/persistentvolumes` - Retrieve persistent volume information
 - `/kube-migrate/k8s/tenant/...` - Multi-tenant resource endpoints
 - `/kube-migrate/debug/...` - Debugging and validation endpoints
-
-```bash
-# Build the Docker image
-docker build -t cluster-migrate-magic .
-
-# Run the container
-docker run -p 3001:3001 -v /path/to/kubeconfig:/app/kubeconfig cluster-migrate-magic
-```
 
 ## Connecting to Kubernetes Clusters
 
@@ -199,15 +399,6 @@ For development without a real Kubernetes cluster:
 2. The application will use realistic simulated data that mimics actual cluster resources
 3. The mock data follows the same structure as real Kubernetes resources
 
-### Hot Module Replacement
-
-The development server supports hot module replacement for rapid development:
-
-```bash
-# Start with HMR enabled
-npm run dev
-```
-
 ### Running Tests
 
 ```bash
@@ -219,47 +410,6 @@ npm run test:e2e
 
 # Run with coverage reporting
 npm run test:coverage
-```
-
-## Production Deployment
-
-### Standard Deployment
-
-1. Build the application:
-   ```bash
-   npm run build
-   ```
-2. Start the production server:
-   ```bash
-   npm run start
-   ```
-
-### Cloud Deployment
-
-The application can be deployed to various cloud services:
-
-#### AWS Deployment
-
-```bash
-# Deploy to AWS Elastic Beanstalk
-npm run deploy:aws
-```
-
-#### Kubernetes Deployment
-
-```bash
-# Apply the Kubernetes manifests
-kubectl apply -f deployment/
-```
-
-#### Environment-Specific Configuration
-
-For production deployments, ensure these environment variables are set:
-
-```
-NODE_ENV=production
-PORT=3001
-KUBECONFIG_PATH=/path/to/kubeconfig  # If using a file-based configuration
 ```
 
 ## Project Structure
@@ -290,53 +440,6 @@ The project follows a modular architecture with clear separation of concerns:
   /kubernetes       # Kubernetes client integration
   /proxy.js         # API proxy for Kubernetes
 ```
-
-## Future Enhancements
-
-### Planned Features
-
-1. **Direct Kubernetes API Access**:
-   - Implement a lightweight WASM-based library for Kubernetes client functionality
-   - Add client-side certificate handling for secure authentication
-   - Address CORS limitations with appropriate proxy configuration
-
-2. **Enhanced Multi-Tenant Support**:
-   - Advanced resource isolation between tenants
-   - Tenant-specific monitoring and alerting
-   - Custom RBAC profiles for tenant administrators
-
-3. **Integration with Additional Cloud Providers**:
-   - Google GKE support
-   - Azure AKS integration
-   - Digital Ocean Kubernetes
-
-### Contribution Guidelines
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Connection to Kubernetes cluster fails**:
-   - Verify your kubeconfig is valid with `kubectl get nodes`
-   - Check that your cluster API is accessible from your network
-   - Ensure proper credentials are configured
-
-2. **Server fails to start**:
-   - Check for port conflicts on 3001
-   - Verify all dependencies are installed
-   - Check the server logs for specific error messages
-
-3. **Mock data not loading**:
-   - Verify `VITE_USE_MOCK_K8S_DATA=true` is set in your `.env`
-   - Restart the application after changing environment variables
 
 ## Support
 

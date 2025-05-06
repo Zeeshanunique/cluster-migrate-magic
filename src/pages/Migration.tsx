@@ -105,28 +105,35 @@ const Migration = () => {
   
   // Direct migration function
   const startDirectMigration = async () => {
-    if (!sourceCluster || !targetCluster) {
-      toast.error('Please select both source and target clusters');
-      return;
-    }
-    
-    if (!sourceCluster.kubeconfig || !targetCluster.kubeconfig) {
-      toast.error('Missing kubeconfig for one of the clusters');
-      return;
-    }
-    
-    setMigrationStatus('starting');
-    setMigrationError(null);
-    
     try {
-      // First fetch all deployments from the source cluster to migrate
-      setMigrationStatus('fetching');
+      if (!sourceCluster || !targetCluster) {
+        toast.error('Please select both source and target clusters');
+        return;
+      }
       
-      // In a real implementation, we would fetch the actual resources here
-      // For now, we'll create a sample list of resources to migrate
-      const resourcesToMigrate: ResourceToMigrate[] = [
-        // Use commonly deployed resources
-        { kind: 'Deployment', name: 'nginx', namespace: 'default' },
+      if (!user) {
+        toast.error('User authentication is required');
+        return;
+      }
+      
+      // Start setting up the migration
+      setMigrationStatus('starting');
+      setMigrationProgress(10);
+      
+      // Log the migration start
+      console.log(`Starting migration from ${sourceCluster.name} to ${targetCluster.name}`);
+      
+      // In a real app, we'd fetch the resources from the source cluster here
+      setMigrationStatus('fetching');
+      setMigrationProgress(20);
+      
+      // Simulate a short delay for fetching resources
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Define resources to migrate
+      const resourcesToMigrate = [
+        { kind: 'Namespace', name: 'default', namespace: '' },
+        { kind: 'Deployment', name: 'nginx-deployment', namespace: 'default' },
         { kind: 'Service', name: 'nginx', namespace: 'default' },
         { kind: 'ConfigMap', name: 'app-config', namespace: 'default' },
         { kind: 'Secret', name: 'app-secrets', namespace: 'default' }
@@ -144,7 +151,10 @@ const Migration = () => {
           targetNamespace: 'default',
           migrateVolumes: false,
           preserveNodeAffinity: false
-        }
+        },
+        { id: sourceCluster.id, name: sourceCluster.name },
+        { id: targetCluster.id, name: targetCluster.name },
+        user.id
       );
       
       setMigrationId(id);
@@ -156,7 +166,9 @@ const Migration = () => {
           
           // Update progress
           if (status.resourcesTotal > 0) {
-            const progressPercentage = Math.floor((status.resourcesMigrated / status.resourcesTotal) * 100);
+            const progressPercentage = Math.floor(
+              ((status.resourcesMigrated + status.resourcesFailed) / status.resourcesTotal) * 100
+            );
             setMigrationProgress(progressPercentage);
           }
           
@@ -165,6 +177,7 @@ const Migration = () => {
             clearInterval(statusInterval);
             setMigrationStatus('completed');
             toast.success('Migration completed successfully');
+            toast.info('You can see all migration history in the Logs page');
           } else if (status.status === 'failed') {
             clearInterval(statusInterval);
             setMigrationStatus('failed');

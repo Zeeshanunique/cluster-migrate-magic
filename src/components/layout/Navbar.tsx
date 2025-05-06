@@ -128,6 +128,11 @@ const Navbar = () => {
                   GitOps Delivery
                 </Link>
               </DropdownMenuItem>
+              <DropdownMenuItem asChild onClick={() => navigate('/logs')}>
+                <Link to="/logs" className="w-full cursor-pointer">
+                  Migration Logs
+                </Link>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -230,6 +235,12 @@ const Navbar = () => {
                   className="text-sm font-medium py-2 transition-colors hover:text-primary"
                 >
                   GitOps Delivery
+                </Link>
+                <Link 
+                  to="/logs" 
+                  className="text-sm font-medium py-2 transition-colors hover:text-primary"
+                >
+                  Migration Logs
                 </Link>
               </>
             )}

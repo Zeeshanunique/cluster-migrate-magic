@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "server": "node server/proxy.js",
-    "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
+    "dev:all": "concurrently \"FRONTEND_PORT=3009 VITE_BACKEND_PORT=8089 npm run dev\" \"BACKEND_PORT=8089 npm run server\"",
+    "dev:all:win": "concurrently \"set FRONTEND_PORT=3009 && set VITE_BACKEND_PORT=8089 && npm run dev\" \"set BACKEND_PORT=8089 && npm run server\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "build:prod": "vite build --mode production",
@@ -14,7 +15,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "NODE_ENV=production node server/proxy.js",
-    "start:win": "set NODE_ENV=production&& node server/proxy.js"
+    "start:win": "set NODE_ENV=production && set BACKEND_PORT=8089 && node server/proxy.js",
+    "setup:prod": "bash setup-production.sh"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.797.0",

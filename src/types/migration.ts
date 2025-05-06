@@ -53,6 +53,7 @@ export interface MigrationLog {
   resourceName?: string;
   resourceKind?: string;
   namespace?: string;
+  isSimulated?: boolean;
 }
 
 export interface MigrationError {

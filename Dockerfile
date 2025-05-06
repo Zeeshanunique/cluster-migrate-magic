@@ -42,12 +42,15 @@ COPY --from=server-builder /app/node_modules ./node_modules
 COPY package.json .
 COPY .env.production .env
 
-# Expose the port the server will run on
-EXPOSE 3001
+# Expose the ports the server will run on
+EXPOSE 8089
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PORT=3001
+ENV PORT=8089
+ENV FRONTEND_PORT=3009
+ENV BACKEND_PORT=8089
+ENV DEPLOYMENT=production
 
 # Start the server
 CMD ["node", "server/proxy.js"]

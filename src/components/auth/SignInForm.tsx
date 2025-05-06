@@ -63,11 +63,40 @@ export default function SignInForm() {
           navigate('/dashboard', { replace: true });
         }, 300);
       } else {
-        toast.error('Invalid email or password');
+        // Check if the error indicates user doesn't exist
+        if (result.error?.includes('User does not exist')) {
+          toast.error(
+            'This account does not exist. Please sign up first.',
+            {
+              description: 'Create an account to get started',
+              action: {
+                label: 'Sign Up',
+                onClick: () => navigate('/sign-up')
+              }
+            }
+          );
+        } else {
+          toast.error('Invalid email or password');
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Sign in error:', error);
-      toast.error('Failed to sign in');
+      
+      // Check for specific error type
+      if (error.message?.includes('UserNotFoundException') || error.message?.includes('User does not exist')) {
+        toast.error(
+          'This account does not exist. Please sign up first.',
+          {
+            description: 'Create an account to get started',
+            action: {
+              label: 'Sign Up',
+              onClick: () => navigate('/sign-up')
+            }
+          }
+        );
+      } else {
+        toast.error('Failed to sign in');
+      }
     } finally {
       setIsLoading(false);
     }

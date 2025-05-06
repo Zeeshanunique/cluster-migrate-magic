@@ -61,7 +61,7 @@ import {
   getEKSSecrets,
   getEKSPVCs
 } from '@/utils/aws';
-import MigrationService from '@/utils/migrationService';
+import MigrationService, { MigrationStatus, ResourceToMigrate, MigrationOptions } from '@/services/MigrationService';
 import { KUBERNETES_API } from '@/utils/api';
 
 const steps = [
@@ -105,7 +105,7 @@ const MigrationWizard = () => {
   
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'running' | 'loading' | 'completed' | 'error' | 'failed' | 'in-progress' | 'success'>('idle');
   const [error, setError] = useState<string | null>(null);
   
   // Available clusters
@@ -259,7 +259,11 @@ const MigrationWizard = () => {
   });
 
   // Migration progress state
-  const [migrationProgress, setMigrationProgress] = useState({ step: 0, message: '' });
+  const [migrationStatus, setMigrationStatus] = useState<'idle' | 'in-progress' | 'completed' | 'failed'>('idle');
+  const [statusMessage, setStatusMessage] = useState('Idle');
+  const errorCount = useRef(0);
+  const startTime = useRef(Date.now());
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Add polling cleanup reference with useRef
   const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -374,7 +378,7 @@ const MigrationWizard = () => {
       return;
     }
 
-    setStatus('running');
+    setStatus('loading');
       
       // Connect to source cluster
     const sourceConnected = await connectToEKSCluster(sourceConfig);
@@ -411,7 +415,7 @@ const MigrationWizard = () => {
     }
 
     setLoadingResources(true);
-    setStatus('running');
+    setStatus('loading');
 
     try {
       // Use the same approach as ClusterDetails to organize resources by Kubernetes hierarchy
@@ -738,7 +742,7 @@ const MigrationWizard = () => {
     }
     
     setCheckingCompatibility(true);
-    setStatus('running');
+    setStatus('loading');
     
     try {
       // Check compatibility between clusters
@@ -772,257 +776,170 @@ const MigrationWizard = () => {
   // Handle migration execution
   const handleStartMigration = async () => {
     try {
-      setStatus('running');
-      setProgress((3 / steps.length) * 100);
-      
-      // Filter only selected resources for all resource types
-      const selectedNamespacesToMigrate = namespaces.filter(ns => ns.selected);
-      const selectedNodesToMigrate = nodes.filter(node => node.selected);
-      const selectedPodsToMigrate = pods.filter(pod => pod.selected);
-      const selectedPVsToMigrate = persistentVolumes.filter(pv => pv.selected);
-      const selectedDeploymentsToMigrate = deployments.filter(d => d.selected);
-      const selectedStatefulSetsToMigrate = statefulSets.filter(s => s.selected);
-      const selectedDaemonSetsToMigrate = daemonSets.filter(d => d.selected);
-      const selectedReplicaSetsToMigrate = replicaSets.filter(r => r.selected);
-      const selectedJobsToMigrate = jobs.filter(j => j.selected);
-      const selectedCronJobsToMigrate = cronJobs.filter(c => c.selected);
-      
-      // Add filtering for new resource types
-      const selectedServicesToMigrate = services.filter(s => s.selected);
-      const selectedIngressesToMigrate = ingresses.filter(i => i.selected);
-      const selectedConfigMapsToMigrate = configMaps.filter(cm => cm.selected);
-      const selectedSecretsToMigrate = secrets.filter(s => s.selected);
-      const selectedPVCsToMigrate = persistentVolumeClaims.filter(p => p.selected);
-      
-      // Count total selected resources across all types
-      const totalSelected = selectedNamespacesToMigrate.length + selectedNodesToMigrate.length + 
-                           selectedPodsToMigrate.length + selectedPVsToMigrate.length +
-                           selectedDeploymentsToMigrate.length + selectedStatefulSetsToMigrate.length + 
-                           selectedDaemonSetsToMigrate.length + selectedReplicaSetsToMigrate.length + 
-                           selectedJobsToMigrate.length + selectedCronJobsToMigrate.length +
-                           selectedServicesToMigrate.length + selectedIngressesToMigrate.length +
-                           selectedConfigMapsToMigrate.length + selectedSecretsToMigrate.length +
-                           selectedPVCsToMigrate.length;
-      
-      console.log(`Selected for migration: ${selectedNamespacesToMigrate.length} namespaces, ${selectedNodesToMigrate.length} nodes, ${selectedPodsToMigrate.length} pods, ${selectedPVsToMigrate.length} PVs, ${selectedDeploymentsToMigrate.length} deployments, ${selectedStatefulSetsToMigrate.length} statefulSets, ${selectedDaemonSetsToMigrate.length} daemonSets, ${selectedReplicaSetsToMigrate.length} replicaSets, ${selectedJobsToMigrate.length} jobs, ${selectedCronJobsToMigrate.length} cronJobs`);
-      
-      // We shouldn't need this check since the button is disabled if nothing is selected,
-      // but keeping it as a safety measure
-      if (totalSelected === 0) {
-        toast.error("No resources selected for migration");
-        setStatus('idle');
+      setStatus('in-progress');  // Use in-progress instead of loading
+      setProgress(5);
+      setError(null);
+
+      // Gather all selected resources
+      const resources = [
+        ...namespaces.filter(ns => ns.selected).map(ns => ({
+          kind: 'Namespace',
+          name: ns.name,
+          namespace: '',
+          apiVersion: 'v1'
+        })),
+        ...deployments.filter(dep => dep.selected).map(dep => ({
+          kind: 'Deployment',
+          name: dep.name,
+          namespace: dep.namespace,
+          apiVersion: 'apps/v1'
+        })),
+        ...services.filter(svc => svc.selected).map(svc => ({
+          kind: 'Service',
+          name: svc.name,
+          namespace: svc.namespace,
+          apiVersion: 'v1'
+        })),
+        ...configMaps.filter(cm => cm.selected).map(cm => ({
+          kind: 'ConfigMap',
+          name: cm.name,
+          namespace: cm.namespace,
+          apiVersion: 'v1'
+        })),
+        ...secrets.filter(sec => sec.selected).map(sec => ({
+          kind: 'Secret',
+          name: sec.name,
+          namespace: sec.namespace,
+          apiVersion: 'v1'
+        })),
+        ...statefulSets.filter(ss => ss.selected).map(ss => ({
+          kind: 'StatefulSet',
+          name: ss.name,
+          namespace: ss.namespace,
+          apiVersion: 'apps/v1'
+        })),
+        ...daemonSets.filter(ds => ds.selected).map(ds => ({
+          kind: 'DaemonSet',
+          name: ds.name,
+          namespace: ds.namespace,
+          apiVersion: 'apps/v1'
+        })),
+        ...ingresses.filter(ing => ing.selected).map(ing => ({
+          kind: 'Ingress',
+          name: ing.name,
+          namespace: ing.namespace,
+          apiVersion: 'networking.k8s.io/v1'
+        })),
+        ...jobs.filter(j => j.selected).map(j => ({
+          kind: 'Job',
+          name: j.name,
+          namespace: j.namespace,
+          apiVersion: 'batch/v1'
+        })),
+        ...cronJobs.filter(cj => cj.selected).map(cj => ({
+          kind: 'CronJob',
+          name: cj.name,
+          namespace: cj.namespace,
+          apiVersion: 'batch/v1'
+        }))
+      ];
+
+      if (resources.length === 0) {
+        toast.error('No resources selected for migration');
+        setStatus('error');
+        setError('No resources selected for migration');
         return;
       }
-      
-      // Convert to resource format expected by the API
-      const resources = [
-        // Include namespaces
-        ...selectedNamespacesToMigrate.map(ns => ({
-          kind: 'Namespace',
-          namespace: '',  // Namespaces don't have a parent namespace
-          name: ns.name
-        })),
-        // Include nodes - nodes are cluster-scoped resources
-        ...selectedNodesToMigrate.map(node => ({
-          kind: 'Node',
-          namespace: '',  // Nodes are cluster-level resources
-          name: node.name
-        })),
-        // Include pods - pods are namespaced resources
-        ...selectedPodsToMigrate.map(pod => ({
-          kind: 'Pod',
-          namespace: pod.namespace || 'default',
-          name: pod.name
-        })),
-        // Include persistent volumes
-        ...selectedPVsToMigrate.map(pv => ({
-          kind: 'PersistentVolume',
-          namespace: '', // PVs are cluster-scoped resources, not namespaced
-          name: pv.name
-        })),
-        // Include deployments
-        ...selectedDeploymentsToMigrate.map(d => ({
-          kind: 'Deployment',
-          namespace: d.namespace || 'default',
-          name: d.name
-        })),
-        // Include statefulSets
-        ...selectedStatefulSetsToMigrate.map(s => ({
-          kind: 'StatefulSet',
-          namespace: s.namespace || 'default',
-          name: s.name
-        })),
-        // Include daemonSets
-        ...selectedDaemonSetsToMigrate.map(d => ({
-          kind: 'DaemonSet',
-          namespace: d.namespace || 'default',
-          name: d.name
-        })),
-        // Include replicaSets
-        ...selectedReplicaSetsToMigrate.map(r => ({
-          kind: 'ReplicaSet',
-          namespace: r.namespace || 'default',
-          name: r.name
-        })),
-        // Include jobs
-        ...selectedJobsToMigrate.map(j => ({
-          kind: 'Job',
-          namespace: j.namespace || 'default',
-          name: j.name
-        })),
-        // Include cronJobs
-        ...selectedCronJobsToMigrate.map(c => ({
-          kind: 'CronJob',
-          namespace: c.namespace || 'default',
-          name: c.name
-        })),
-        // Include networking resources
-        ...selectedServicesToMigrate.map(s => ({
-          kind: 'Service',
-          namespace: s.namespace || 'default',
-          name: s.name
-        })),
-        ...selectedIngressesToMigrate.map(i => ({
-          kind: 'Ingress',
-          namespace: i.namespace || 'default',
-          name: i.name
-        })),
-        // Include configuration resources
-        ...selectedConfigMapsToMigrate.map(cm => ({
-          kind: 'ConfigMap',
-          namespace: cm.namespace || 'default',
-          name: cm.name
-        })),
-        ...selectedSecretsToMigrate.map(s => ({
-          kind: 'Secret',
-          namespace: s.namespace || 'default',
-          name: s.name
-        })),
-        // Include storage resources
-        ...selectedPVCsToMigrate.map(p => ({
-          kind: 'PersistentVolumeClaim',
-          namespace: p.namespace || 'default',
-          name: p.name
-        })),
-      ];
-      
-      // Set up migration options
-      const migrationOptions = {
-        targetNamespace: 'default', // Default target namespace
-        migrateVolumes: true,
-        preserveNodeAffinity: false
-      };
-      
-      // Start migration using the service
-      const migrationId = await MigrationService.migrateResources(
-        sourceConfig.kubeconfig!,
-        targetConfig.kubeconfig!,
-        resources,
-        migrationOptions
+
+      // Inform user that we're starting a real migration
+      toast.info(`Starting migration of ${resources.length} resources`);
+      toast.warning(
+        'MIGRATION IN PROGRESS: Resources are being migrated between clusters', 
+        { id: 'migration-warning', duration: 20000 }
       );
-      
-      // Update UI right away to show initial progress
-      setMigrationProgress({
-        step: 1,
-        message: 'Starting migration: Preparing resources'
-      });
-      
-      // Helper function to convert migration step strings to step numbers for UI progress
-      const getStepNumberFromStatus = (stepString: string): number => {
-        if (!stepString) return 1;
-        
-        // Map common step strings to step numbers
-        if (stepString.includes('Initializing') || stepString.includes('Preparing')) return 1;
-        if (stepString.includes('Namespace')) return 2;
-        if (stepString.includes('ConfigMap') || stepString.includes('Secret')) return 2;
-        if (stepString.includes('PersistentVolume')) return 3;
-        if (stepString.includes('Service') || stepString.includes('Ingress')) return 3;
-        if (stepString.includes('Deployment') || stepString.includes('StatefulSet') || 
-            stepString.includes('DaemonSet') || stepString.includes('Job')) return 4;
-        if (stepString.includes('Pod')) return 4;
-        if (stepString.includes('Completed') || stepString.includes('Finalizing')) return 5;
-        
-        // Default to step 3 (middle step) if not recognized
-        return 3;
-      };
-      
-      // Define a function to poll migration status
-      const pollMigrationStatus = async () => {
+
+      // Include sourceCluster and targetCluster information, along with userId for tracking
+      const migrationId = await MigrationService.migrateResources(
+        sourceCluster.kubeconfig || '',
+        targetCluster.kubeconfig || '',
+        resources,
+        {
+          targetNamespace: '',
+          preserveNodeAffinity: false,
+          migrateVolumes: true,
+          debugMode: true // Enable detailed diagnostics
+        },
+        { id: sourceCluster.id, name: sourceCluster.name },
+        { id: targetCluster.id, name: targetCluster.name },
+        user?.id || ''
+      );
+
+      // Set up polling for migration status
+      const statusInterval = setInterval(async () => {
         try {
           const migrationStatus = await MigrationService.getMigrationStatus(migrationId);
-          console.log(`Migration status update:`, migrationStatus);
           
-          if (migrationStatus.status === 'completed') {
-            // Track successfully migrated resources by type
-            const migratedResourceCounts = migrationStatus.migratedResources || {};
-            
-            // Calculate total migrated resources from the status
-            const totalMigrated = migrationStatus.resourcesMigrated || 0;
-            
-            // If we have specific resource counts, use them
-            // Otherwise, infer from the total based on resource types
-            setMigratedResources({
-              pods: migratedResourceCounts.Pod || 0,
-              persistentVolumes: migratedResourceCounts.PersistentVolume || 0,
-              namespaces: migratedResourceCounts.Namespace || (migrationStatus.currentStep.includes('Namespace') ? totalMigrated : 0),
-              nodes: migratedResourceCounts.Node || 0,
-              services: migratedResourceCounts.Service || 0,
-              configMaps: migratedResourceCounts.ConfigMap || 0,
-              secrets: migratedResourceCounts.Secret || 0,
-              deployments: migratedResourceCounts.Deployment || 0,
-              statefulSets: migratedResourceCounts.StatefulSet || 0,
-              daemonSets: migratedResourceCounts.DaemonSet || 0,
-              replicaSets: migratedResourceCounts.ReplicaSet || 0,
-              jobs: migratedResourceCounts.Job || 0,
-              cronJobs: migratedResourceCounts.CronJob || 0
+          // Show any warning in the migration status
+          if (migrationStatus.warning) {
+            toast.warning(migrationStatus.warning, {
+              id: 'migration-warning',
+              duration: 10000
             });
+          }
+          
+          const totalResources = migrationStatus.resourcesTotal || resources.length;
+          const migratedResources = migrationStatus.resourcesMigrated || 0;
+          // Calculate progressPercentage safely
+          let progressPercentage = 0;
+          if (totalResources > 0) {
+            progressPercentage = Math.floor((migratedResources / totalResources) * 100);
+          }
+          
+          // Update both status and migrationStatus together for consistency
+          setProgress(progressPercentage > 100 ? 100 : progressPercentage);
+          // Convert 'unknown' status to 'in-progress' instead of 'idle' for better UX
+          const mappedStatus = migrationStatus.status === 'unknown' ? 'in-progress' : migrationStatus.status || 'in-progress';
+          setStatus(mappedStatus as 'idle' | 'loading' | 'success' | 'error' | 'in-progress' | 'completed' | 'failed');
+          
+          // Set a clear status message for the user
+          setStatusMessage(`Migrating resources (${migratedResources}/${totalResources})`);
+          
+          // Handle completed/failed migration
+          if (mappedStatus === 'completed' || mappedStatus === 'failed') {
+            clearInterval(statusInterval);
             
-            setStatus('completed');
-            setProgress(100);
-            setMigrationProgress({
-              step: 5,
-              message: `Migration completed successfully: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources migrated`
-            });
-            toast.success(`Migration completed successfully!`);
-            setCurrentStep(4);
-            return;
-          } else if (migrationStatus.status === 'failed') {
-            setStatus('error');
-            setError(migrationStatus.error || 'Migration failed with an unknown error');
-            toast.error(`Migration failed: ${migrationStatus.error || 'Unknown error'}`);
-            return;
-          } else {
-            // Still running, update progress
-            const stepNumber = getStepNumberFromStatus(migrationStatus.currentStep);
-            const progressPercent = Math.floor((migrationStatus.resourcesMigrated / migrationStatus.resourcesTotal) * 100);
+            // Clear any previous toast messages and display appropriate completion message
+            toast.dismiss('migration-warning');
             
-            setMigrationProgress({
-              step: stepNumber,
-              message: `${migrationStatus.currentStep}: ${migrationStatus.resourcesMigrated}/${migrationStatus.resourcesTotal} resources`
-            });
-            
-            // Update main progress bar based on both step and resource completion
-            const stepProgress = ((3 + (stepNumber / 5)) / steps.length) * 100;
-            const combinedProgress = Math.max(stepProgress, (3 / steps.length) * 100 + progressPercent * (1 / steps.length));
-            setProgress(Math.min(combinedProgress, 80)); // Cap at 80% until fully complete
-            
-            // Continue polling
-            pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
+            if (mappedStatus === 'completed') {
+              toast.success(`Migration completed successfully (${migratedResources}/${totalResources} resources)`, {
+                duration: 5000
+              });
+              // Navigate to migration logs page to see details
+              setTimeout(() => {
+                navigate(`/logs`);
+              }, 2000);
+            } else {
+              toast.error(`Migration failed (${migrationStatus.resourcesFailed || 0} resources failed)`, {
+                duration: 5000
+              });
+            }
           }
         } catch (error) {
-          console.error(`Error polling migration status:`, error);
-          pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
+          console.error('Error checking migration status:', error);
+          setError('Error checking migration status');
         }
+      }, 5000); // Check every 5 seconds
+
+      return () => {
+        if (statusInterval) clearInterval(statusInterval);
       };
-      
-      // Start polling
-      pollTimeoutRef.current = setTimeout(pollMigrationStatus, 5000);
-      
-    } catch (error) {
-      console.error('Migration failed:', error);
+
+    } catch (error: any) {
+      console.error('Error starting migration:', error);
+      toast.error(`Migration failed to start: ${error.message || 'Unknown error'}`);
       setStatus('error');
-      setError(`Migration failed: ${(error as Error).message}`);
-      toast.error(`Migration failed: ${(error as Error).message}`);
+      setError(error.message || 'Unknown error');
     }
   };
 
@@ -1062,7 +979,8 @@ const MigrationWizard = () => {
     setJobs([]);
     setCronJobs([]);
     setCompatibility({ compatible: false, issues: [] });
-    setMigrationProgress({ step: 0, message: '' });
+    setMigrationStatus('idle');
+    setStatusMessage('Idle');
     
     // Clear any polling timeout
     if (pollTimeoutRef.current) {
@@ -1071,21 +989,25 @@ const MigrationWizard = () => {
     }
   };
 
-  // Finish migration and navigate back to dashboard
+  // Function to handle "Finish" button on final step
   const finishMigration = () => {
-    // First ensure the cluster is updated properly in Supabase
-    if (sourceCluster && status === 'completed') {
-      // Force a refresh of the dashboard by navigating with a timestamp parameter
-      // This ensures the dashboard will reload cluster data from Supabase
-      toast.success("Migration completed and saved. Redirecting to dashboard...");
-      navigate('/dashboard?refresh=' + Date.now());
-    } else if (status === 'error') {
-      // If there was an error, we'll go to the dashboard anyway
-      toast.error("Migration had errors - please check your cluster status");
-      navigate('/dashboard');
-    } else {
-    navigate('/dashboard');
-    }
+    // Ask user what they want to do next
+    toast.message(
+      'Migration complete',
+      {
+        id: 'migration-complete-next-actions',
+        duration: 8000,
+        action: {
+          label: 'What next?',
+          onClick: () => {
+            toast.dismiss('migration-complete-next-actions');
+            resetMigration();
+          }
+        }
+      }
+    );
+
+    resetMigration(); // Reset the wizard state
   };
 
   // Render appropriate content for current step
@@ -1324,7 +1246,12 @@ const MigrationWizard = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <Progress value={status === 'completed' ? 100 : (migrationProgress.step / 5) * 100} className="w-full" />
+                <Progress value={progress} className="w-full" />
+                
+                <div className="flex justify-between items-center mb-2 text-sm">
+                  <div>Progress: <span className="font-semibold">{progress}%</span></div>
+                  <div>Status: <span className="font-semibold capitalize">{status}</span></div>
+                </div>
                 
                 <div className="space-y-3">
                   {[
@@ -1335,27 +1262,30 @@ const MigrationWizard = () => {
                     "Verifying successful migration"
                   ].map((step, index) => (
                     <div key={index} className="flex items-center">
-                      {migrationProgress.step > index ? (
+                      {progress > (index * 20) ? (
                         <div className="h-5 w-5 rounded-full bg-green-500 flex items-center justify-center mr-3">
                           <Check className="h-3 w-3 text-white" />
                         </div>
-                      ) : migrationProgress.step === index ? (
+                      ) : progress >= (index * 20) && progress < ((index + 1) * 20) ? (
                         <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center animate-pulse mr-3">
                           <div className="h-2 w-2 rounded-full bg-primary" />
                         </div>
                       ) : (
                         <div className="h-5 w-5 rounded-full border-2 border-gray-200 dark:border-gray-700 mr-3" />
                       )}
-                      <span className={migrationProgress.step >= index ? 'text-foreground' : 'text-muted-foreground'}>
+                      <span className={progress >= (index * 20) ? 'text-foreground' : 'text-muted-foreground'}>
                         {step}
                       </span>
                     </div>
                   ))}
                 </div>
                 
-                {migrationProgress.message && (
-                  <div className="bg-primary-50 dark:bg-primary-950/30 p-3 rounded-md text-sm text-primary-700 dark:text-primary-300">
-                    {migrationProgress.message}
+                {statusMessage && (
+                  <div className="bg-primary-50 dark:bg-primary-950/30 p-3 rounded-md text-sm text-primary-700 dark:text-primary-300 flex items-center justify-center">
+                    {status === 'in-progress' && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-primary" />
+                    )}
+                    {statusMessage}
                   </div>
                 )}
               </CardContent>
@@ -1398,10 +1328,10 @@ const MigrationWizard = () => {
                 <div className="bg-green-50 dark:bg-green-950/30 p-4 rounded-md">
                   <h4 className="font-medium text-green-800 dark:text-green-300 mb-2">Migration Summary</h4>
                   <ul className="space-y-2 text-sm text-green-700 dark:text-green-300">
-                    {migrationProgress.message && (
+                    {statusMessage && (
                       <li className="flex items-center">
                         <Check className="h-4 w-4 mr-2" />
-                        {migrationProgress.message}
+                        {statusMessage}
                       </li>
                     )}
                     <li className="flex items-center">
@@ -1412,13 +1342,24 @@ const MigrationWizard = () => {
                       <Check className="h-4 w-4 mr-2" />
                       Created new kubeconfig for multi-tenant setup
                     </li>
-                    {status === 'completed' && migrationProgress.step === 5 && !migrationProgress.message.includes('resources migrated') && (
+                    {status === 'completed' && progress === 5 && !statusMessage.includes('resources migrated') && (
                       <li className="flex items-center text-yellow-600 dark:text-yellow-400">
                         <AlertCircle className="h-4 w-4 mr-2" />
                         No resources were migrated. Please check your resource selection.
                       </li>
                     )}
                   </ul>
+                </div>
+                
+                <div className="flex justify-center mt-4">
+                  <Button 
+                    variant="outline"
+                    onClick={() => navigate('/logs')}
+                    className="flex items-center gap-2"
+                  >
+                    <Server className="h-4 w-4" />
+                    View Migration Logs
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -1445,14 +1386,14 @@ const MigrationWizard = () => {
               <Button 
                 onClick={connectToClusters}
                 disabled={
-                status === 'running' || 
+                (status === 'running' || status === 'loading' || status === 'in-progress') || 
                 !sourceCluster || 
                 !targetCluster || 
                 availableSingleClusters.length === 0 || 
                 availableMultiClusters.length === 0
               }
             >
-              {status === 'running' ? (
+              {(status === 'running' || status === 'loading' || status === 'in-progress') ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Connecting...
@@ -1460,8 +1401,8 @@ const MigrationWizard = () => {
               ) : (
                 <>
                   Connect Clusters <ChevronRight className="ml-2 h-4 w-4" />
-            </>
-          )}
+                </>
+              )}
             </Button>
           </>
         );
@@ -1481,7 +1422,7 @@ const MigrationWizard = () => {
             <Button 
               onClick={proceedToCompatibilityCheck}
               disabled={
-                status === 'running' || 
+                (status === 'running' || status === 'loading' || status === 'in-progress') || 
                 (namespaces.filter(ns => ns.selected).length + 
                 nodes.filter(node => node.selected).length + 
                 pods.filter(pod => pod.selected).length + 
@@ -1499,7 +1440,7 @@ const MigrationWizard = () => {
                 persistentVolumeClaims.filter(pvc => pvc.selected).length) === 0
               }
             >
-              {status === 'running' ? (
+              {(status === 'running' || status === 'loading' || status === 'in-progress') ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Processing...
@@ -1527,9 +1468,9 @@ const MigrationWizard = () => {
             </Button>
             <Button 
               onClick={handleStartMigration} 
-              disabled={status === 'running' || !compatibility.compatible}
+              disabled={(status === 'running' || status === 'loading' || status === 'in-progress') || !compatibility.compatible}
             >
-              {status === 'running' ? (
+              {(status === 'running' || status === 'loading' || status === 'in-progress') ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Checking...
@@ -1548,12 +1489,12 @@ const MigrationWizard = () => {
           <>
             {status === 'error' ? (
               <>
-              <Button 
-                variant="outline" 
+                <Button 
+                  variant="outline" 
                   onClick={resetMigration}
-              >
+                >
                   Restart
-              </Button>
+                </Button>
                 <Button
                   onClick={() => navigate('/dashboard')}
                 >
@@ -1562,11 +1503,9 @@ const MigrationWizard = () => {
               </>
             ) : status === 'completed' ? (
               <Button 
-                variant="outline" 
-                disabled
+                onClick={() => navigate('/logs')}
               >
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Completing...
+                View Migration Logs
               </Button>
             ) : (
               <Button

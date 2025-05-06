@@ -7,15 +7,17 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const isProduction = mode === 'production';
+  const FRONTEND_PORT = env.FRONTEND_PORT || 3009;
+  const BACKEND_PORT = env.BACKEND_PORT || 8089;
   
   return {
-    base: isProduction ? '/' : '/',
+    base: isProduction ? '/kube-migrate/' : '/',
     server: {
       host: "::",
-      port: 8080,
+      port: FRONTEND_PORT,
       proxy: {
         '/kube-migrate': {
-          target: env.VITE_K8S_PROXY_URL || 'http://localhost:3001',
+          target: env.VITE_K8S_PROXY_URL || `http://localhost:${BACKEND_PORT}`,
           changeOrigin: true,
           secure: false,
         }

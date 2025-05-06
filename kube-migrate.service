@@ -1,0 +1,21 @@
+[Unit]
+Description=Kube Migrate Application
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/path/to/cluster-migrate-magic
+ExecStart=/path/to/cluster-migrate-magic/start-app.sh
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=kube-migrate
+Environment=NODE_ENV=production
+Environment=DEPLOYMENT=production
+Environment=PORT=8089
+Environment=BACKEND_PORT=8089
+Environment=FRONTEND_PORT=3009
+
+[Install]
+WantedBy=multi-user.target 

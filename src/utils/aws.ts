@@ -2,6 +2,10 @@ import { toast } from "sonner";
 import { supabase } from './supabase';
 import { KUBERNETES_API, apiRequest } from './api';
 
+// Add backend port constant near the top of the file
+const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || 8089;
+const API_URL = import.meta.env.VITE_API_URL || `http://localhost:${BACKEND_PORT}`;
+
 // Types for AWS EKS resources
 export interface EKSClusterConfig {
   clusterName: string;
@@ -255,7 +259,7 @@ export const migrateResources = async (
     };
     
     // Initiate migration
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/kube-migrate/k8s/migrate`, {
+    const response = await fetch(`${API_URL}/kube-migrate/k8s/migrate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -283,7 +287,7 @@ export const migrateResources = async (
     while (!migrationComplete) {
       await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2 seconds
       
-      const statusResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/kube-migrate/k8s/migration/${migrationId}/status`);
+      const statusResponse = await fetch(`${API_URL}/kube-migrate/k8s/migration/${migrationId}/status`);
       
       if (!statusResponse.ok) {
         throw new Error('Failed to fetch migration status');
